@@ -4,3 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
+
+[dependencies]
+tanki-core = { path = "../crates/tanki-core", optional = true }
+
+[features]
+fixtures = ["dep:tanki-core"]

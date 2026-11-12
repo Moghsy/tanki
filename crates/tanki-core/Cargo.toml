@@ -10,3 +10,9 @@ anki = { path = "../../vendor/anki/rslib", features = ["rustls"] }
 anki_proto = { path = "../../vendor/anki/rslib/proto" }
 anki_i18n = { path = "../../vendor/anki/rslib/i18n" }
 prost = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.36", features = ["bundled"] }
+
+[dev-dependencies]
+tempfile = "3"

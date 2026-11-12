@@ -12,6 +12,7 @@ Prerequisites: Rust 1.97.1, a C compiler, and protoc (31.1 recommended). Install
 
 ```sh
 export PROTOC="$HOME/.local/bin/protoc" # or your installed protoc path
+git submodule update --init -- vendor/anki
 cargo xtask setup
 cargo build --workspace
 cargo test --workspace
@@ -19,3 +20,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 `cargo xtask setup` initializes the pinned Anki checkout and only its two translation submodules, then applies the checked-in patches idempotently.
+
+Generate a synthetic profile (all six stock note types, media, three reviews):
+
+```sh
+fixture_base=$(mktemp -d)
+cargo run -p xtask --features fixtures -- fixtures --base "$fixture_base"
+```

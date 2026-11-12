@@ -608,8 +608,8 @@ Tasks, in order (mostly sequential; little to parallelise):
 - [x] Add `vendor/anki` submodule at `4aa9c0836` with the two `ftl` submodules; `rust-toolchain.toml`; seed `Cargo.lock`; workspace skeleton from 4.2 with empty crates.
 - [x] `xtask setup`: init submodules, apply `patches/anki/*.patch` idempotently.
 - [x] Write patch 0001 and prove it compiles; if it cannot, implement the `Backend` hand-over fallback (4.3) and record the outcome in this plan.
-- [ ] `tanki-core`: collection actor (thread + channels), open/close with explicit media paths, typed commands for deck tree, queued cards, render, answer, undo; `OpChanges` broadcast.
-- [ ] Fixture generator in `xtask`: builds synthetic collections in a temp folder using only tanki-core (notes of every stock note type, media files, a few reviews).
+- [x] `tanki-core`: collection actor (thread + channels), open/close with explicit media paths, typed commands for deck tree, queued cards, render, answer, undo; `OpChanges` broadcast.
+- [x] Fixture generator in `xtask`: builds synthetic collections in a temp folder using only tanki-core (notes of every stock note type, media files, a few reviews).
 - [ ] Guard: the binary refuses to open a base folder that is not a temp/fixture folder unless `TANKI_ALLOW_REAL_PROFILE=1` is set (removed at Phase 2 exit; see section 14).
 - [ ] Spike A — sync with public functions only: run Anki's `SimpleServer` in-process on a temp folder, then login, normal sync, full upload, full download, media sync, abort. Record what worked.
 - [ ] Spike B — golden render harness: script that renders every fixture card with Anki's Python package at the pinned version and stores question/answer HTML plus audio-tag lists; a Rust test compares tanki-core's pipeline (6.0). Settle `partial_render`.
@@ -779,7 +779,7 @@ Each item names the phase that resolves it. Replace the entry with the result wh
 
 Hard constraints. If a task seems to require breaking one, stop and ask the user.
 
-User-approved Phase 0 exceptions (2026-11-12): Spike C may update only `col.ver` in a generated, closed temporary fixture to test future-schema rejection. No other raw SQL writes are allowed. GPT-6.1 Terra at high effort (complex spikes) or medium effort (mechanical spikes) substitutes for unavailable Opus/Sonnet agents.
+User-approved Phase 0 exceptions (2026-11-12): Spike C may update only `col.ver` in a generated, closed temporary fixture to test future-schema rejection. No other raw SQL writes are allowed. GPT-6.1 Sol at high effort (complex spikes) or GPT-6.1 Terra at medium effort (mechanical spikes) substitutes for unavailable Opus/Sonnet agents.
 
 **Data safety**
 

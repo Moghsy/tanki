@@ -3082,6 +3082,10 @@ dependencies = [
  "anki_i18n",
  "anki_proto",
  "prost",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -4229,6 +4233,9 @@ checksum = "ea2f10b9bb0928dfb1b42b65e1f9e36f7f54dbdf08457afefb38afcdec4fa2bb"
 [[package]]
 name = "xtask"
 version = "0.0.0"
+dependencies = [
+ "tanki-core",
+]
 
 [[package]]
 name = "yoke"

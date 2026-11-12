@@ -1,5 +1,13 @@
 //! tanki core: Phase 0 workspace foundation.
 
+mod actor;
+mod fixture;
+mod safety;
+mod types;
+pub use actor::CollectionActor;
+pub use safety::validate_profile;
+pub use types::*;
+
 #[cfg(test)]
 mod tests {
     #[test]

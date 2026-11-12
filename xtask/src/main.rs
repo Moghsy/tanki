@@ -98,7 +98,35 @@ fn main() -> Result<()> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     match std::env::args().skip(1).collect::<Vec<_>>().as_slice() {
         [command] if command == "setup" => setup(root),
-        _ => Err("usage: cargo xtask setup".into()),
+        #[cfg(feature = "fixtures")]
+        [command, flag, base] if command == "fixtures" && flag == "--base" => {
+            let base = Path::new(base);
+            let checked = tanki_core::validate_profile(base)?;
+            let profile = checked.join("tanki-fixture");
+            std::fs::create_dir(&profile)?;
+            let actor = tanki_core::CollectionActor::open(&profile)?;
+            actor.execute(tanki_core::Command::GenerateFixture)?;
+            for _ in 0..3 {
+                if let tanki_core::Response::Queue(queue) =
+                    actor.execute(tanki_core::Command::Queue { limit: 1 })?
+                {
+                    if let Some(card) = queue.cards.first() {
+                        actor.execute(tanki_core::Command::Answer {
+                            card_id: card.id,
+                            rating: tanki_core::Rating::Good,
+                            answered_at_millis: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)?
+                                .as_millis() as i64,
+                            milliseconds_taken: 3000,
+                        })?;
+                    }
+                }
+            }
+            actor.close()?;
+            println!("{}", profile.display());
+            Ok(())
+        }
+        _ => Err("usage: cargo xtask setup | fixtures --base EXISTING_TEMP_DIR".into()),
     }
 }
 
