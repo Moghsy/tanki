@@ -1,0 +1,12 @@
+[package]
+name = "tanki-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+anki = { path = "../../vendor/anki/rslib", features = ["rustls"] }
+anki_proto = { path = "../../vendor/anki/rslib/proto" }
+anki_i18n = { path = "../../vendor/anki/rslib/i18n" }
+prost = "0.13"

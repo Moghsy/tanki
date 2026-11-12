@@ -1,0 +1,22 @@
+--- a/rslib/src/lib.rs
++++ b/rslib/src/lib.rs
+@@ -32,7 +32,7 @@
+ pub mod ops;
+ mod preferences;
+ pub mod prelude;
+-mod progress;
++pub mod progress;
+ pub mod revlog;
+ pub mod scheduler;
+ pub mod search;
+--- a/rslib/src/progress.rs
++++ b/rslib/src/progress.rs
+@@ -145,7 +145,7 @@
+     DownloadUpdate(DownloadUpdateProgress),
+ }
+ 
+-pub(crate) fn progress_to_proto(
++pub fn progress_to_proto(
+     progress: Option<Progress>,
+     tr: &I18n,
+ ) -> anki_proto::collection::Progress {

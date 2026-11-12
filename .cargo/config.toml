@@ -1,0 +1,8 @@
+[alias]
+xtask = "run --package xtask --"
+
+[env]
+PROTOC = { value = "protoc", force = false }
+
+[build]
+jobs = 4
