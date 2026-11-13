@@ -62,45 +62,49 @@ pub enum AudioEvent {
 
 /// The audio player. Owns a background thread; dropping it stops playback.
 pub struct Audio {
-    _private: (),
+    inner: engine::Handle,
 }
 
 impl Audio {
     /// Never fails: problems surface through [`Audio::status`] and events.
     pub fn start(config: AudioConfig) -> Self {
-        let _ = config;
-        unimplemented!("media stream")
+        let media_dir = config.media_dir.clone();
+        Self {
+            inner: engine::Handle::spawn(media_dir, move || backends::select(&config)),
+        }
     }
     pub fn status(&self) -> BackendStatus {
-        unimplemented!("media stream")
+        self.inner.status()
     }
     /// Queues `tags`. With `interrupt`, first stops the current tag and
-    /// clears the queue (Anki's `interruptAudioWhenAnswering`).
+    /// clears the queue (Anki's `interruptAudioWhenAnswering`). Interrupted
+    /// or stopped tags emit no `Finished`; `Idle` follows once the queue is empty.
     pub fn play(&self, tags: Vec<MediaTag>, interrupt: bool) {
-        let _ = (tags, interrupt);
-        unimplemented!("media stream")
+        self.inner.play(tags, interrupt);
     }
     /// Stops and clears the queue.
     pub fn stop(&self) {
-        unimplemented!("media stream")
+        self.inner.stop();
     }
     pub fn toggle_pause(&self) {
-        unimplemented!("media stream")
+        self.inner.toggle_pause();
     }
     /// Seeks the current tag by `seconds` (negative = back).
     pub fn seek(&self, seconds: f64) {
-        let _ = seconds;
-        unimplemented!("media stream")
+        self.inner.seek(seconds);
     }
     /// Something is playing or queued.
     pub fn is_playing(&self) -> bool {
-        unimplemented!("media stream")
+        self.inner.is_playing()
     }
     /// A new receiver for playback events.
     pub fn subscribe(&self) -> Receiver<AudioEvent> {
-        unimplemented!("media stream")
+        self.inner.subscribe()
     }
 }
+
+mod backends;
+mod engine;
 
 /// Anki's rules for which tags play when (R2 §2, R3 §4.3). Pure functions.
 pub mod rules {
@@ -114,13 +118,19 @@ pub mod rules {
 
     /// Tags to play when the question is shown (empty unless `autoplay`).
     pub fn on_show_question(question: &[MediaTag], autoplay: bool) -> Vec<MediaTag> {
-        let _ = (question, autoplay);
-        unimplemented!("media stream")
+        if autoplay {
+            question.to_vec()
+        } else {
+            Vec::new()
+        }
     }
     /// Tags to play when the answer is shown: only the answer's own tags.
     pub fn on_show_answer(answer: &[MediaTag], autoplay: bool) -> Vec<MediaTag> {
-        let _ = (answer, autoplay);
-        unimplemented!("media stream")
+        if autoplay {
+            answer.to_vec()
+        } else {
+            Vec::new()
+        }
     }
     /// Replay key: the question side replays question tags; the answer side
     /// replays answer tags, preceded by question tags unless
@@ -131,7 +141,44 @@ pub mod rules {
         answer: &[MediaTag],
         skip_question_when_replaying_answer: bool,
     ) -> Vec<MediaTag> {
-        let _ = (side, question, answer, skip_question_when_replaying_answer);
-        unimplemented!("media stream")
+        match side {
+            Side::Question => question.to_vec(),
+            Side::Answer if skip_question_when_replaying_answer => answer.to_vec(),
+            Side::Answer => question.iter().chain(answer).cloned().collect(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod rules_tests {
+    use super::rules::*;
+    use super::MediaTag;
+
+    fn s(n: &str) -> MediaTag {
+        MediaTag::Sound(n.into())
+    }
+
+    #[test]
+    fn question_autoplay() {
+        let q = [s("q.mp3")];
+        assert_eq!(on_show_question(&q, true), vec![s("q.mp3")]);
+        assert!(on_show_question(&q, false).is_empty());
+    }
+
+    #[test]
+    fn answer_plays_only_its_own() {
+        let a = [s("a.mp3")];
+        assert_eq!(on_show_answer(&a, true), vec![s("a.mp3")]);
+        assert!(on_show_answer(&a, false).is_empty());
+        assert!(on_show_answer(&[], true).is_empty());
+    }
+
+    #[test]
+    fn replay_rules() {
+        let (q, a) = ([s("q")], [s("a")]);
+        assert_eq!(replay(Side::Question, &q, &a, false), vec![s("q")]);
+        assert_eq!(replay(Side::Question, &q, &a, true), vec![s("q")]);
+        assert_eq!(replay(Side::Answer, &q, &a, false), vec![s("q"), s("a")]);
+        assert_eq!(replay(Side::Answer, &q, &a, true), vec![s("a")]);
     }
 }
