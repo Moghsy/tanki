@@ -537,8 +537,8 @@ const STUDY_NOTES: &[StudyNote] = &[
 /// - `study::cram`: pulled into the filtered deck "Study Cram".
 ///
 /// "Study: French" buries new and review siblings, "Study: Science" makes a
-/// card a leech on its first lapse and suspends it, "Study: Media" changes
-/// the reviewer settings. "Study" (Markdown description) becomes current.
+/// card a leech on its first lapse and suspends it (and turns autoplay off),
+/// "Study: Media" changes the reviewer settings. "Study" (Markdown description) becomes current.
 pub(crate) fn populate_study(col: &mut Collection) -> Result<()> {
     use anki::services::{
         CardsService, DeckConfigService, DecksService, SchedulerService, SearchService,
@@ -590,6 +590,8 @@ pub(crate) fn populate_study(col: &mut Collection) -> Result<()> {
                 ("lapse.leechFails", 1.into()),
                 // LEECH_ACTION_SUSPEND
                 ("lapse.leechAction", 0.into()),
+                // Tells this preset apart in `StudyConfig` tests.
+                ("autoplay", false.into()),
             ],
         ),
         (

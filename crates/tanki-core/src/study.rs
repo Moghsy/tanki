@@ -746,6 +746,54 @@ pub(crate) fn flag_names(col: &mut Collection) -> Vec<String> {
 mod tests {
     use super::*;
 
+    /// `V3CardInfo.from_queue`: the queued card's `custom_data` is copied
+    /// into the cached current state, and survives answering.
+    #[test]
+    fn queue_copies_custom_data_into_current_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut col = anki::collection::CollectionBuilder::new(dir.path().join("c.anki2"))
+            .build()
+            .unwrap();
+        let nt = col.get_notetype_by_name("Basic").unwrap().unwrap();
+        let mut note =
+            NotesService::new_note(&mut col, pb::notetypes::NotetypeId { ntid: nt.id.0 }).unwrap();
+        note.fields = vec!["q".into(), "a".into()];
+        let _ = NotesService::add_note(
+            &mut col,
+            pb::notes::AddNoteRequest {
+                note: Some(note),
+                deck_id: 1,
+            },
+        )
+        .unwrap();
+        let mut cache = StateCache::new();
+        let id = queue(&mut col, 1, &mut cache).unwrap().cards[0].id;
+        assert_eq!(
+            cache[&id].current.as_ref().unwrap().custom_data.as_deref(),
+            Some("")
+        );
+        let mut stored = card(&mut col, id).unwrap();
+        stored.custom_data = r#"{"x":1}"#.into();
+        let _ = CardsService::update_cards(
+            &mut col,
+            pb::cards::UpdateCardsRequest {
+                cards: vec![stored],
+                skip_undo_entry: true,
+            },
+        )
+        .unwrap();
+        let q = queue(&mut col, 1, &mut cache).unwrap();
+        assert_eq!(q.cards[0].id, id);
+        assert_eq!(
+            cache[&id].current.as_ref().unwrap().custom_data.as_deref(),
+            Some(r#"{"x":1}"#)
+        );
+        let outcome = answer(&mut col, &cache, id, Rating::Good, 1_700_000_000_000, 1000).unwrap();
+        assert!(outcome.changes.card && !outcome.leech && !outcome.suspended);
+        assert_eq!(card(&mut col, id).unwrap().custom_data, r#"{"x":1}"#);
+        col.close(None).unwrap();
+    }
+
     #[test]
     fn tags_match_case_insensitively() {
         assert!(has_tag(&["Marked".into()], MARKED_TAG));
