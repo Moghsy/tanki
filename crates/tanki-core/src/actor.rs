@@ -1,10 +1,7 @@
 use crate::*;
 use anki::{
     collection::{Collection, CollectionBuilder},
-    services::{
-        CardRenderingService, CollectionService, DecksService, NotesService, SchedulerService,
-        SearchService,
-    },
+    services::{CardRenderingService, CollectionService, NotesService, SearchService},
 };
 use anki_proto as pb;
 use std::{
@@ -203,7 +200,7 @@ fn backup_and_relock(mut col: Collection, profile: &Path) -> Result<(Collection,
     col.close(None)?;
     Ok((open_collection(profile)?, saved.map(|_| ())))
 }
-fn changes(c: pb::collection::OpChanges) -> OpChanges {
+pub(crate) fn changes(c: pb::collection::OpChanges) -> OpChanges {
     OpChanges {
         card: c.card,
         note: c.note,
@@ -235,97 +232,27 @@ fn deck(d: pb::decks::DeckTreeNode) -> Deck {
 fn execute(
     col: &mut Collection,
     command: Command,
-    queued: &mut HashMap<i64, pb::scheduler::SchedulingStates>,
+    queued: &mut study::StateCache,
 ) -> Result<Response> {
     Ok(match command {
-        Command::DeckTree => Response::DeckTree(deck(DecksService::deck_tree(
-            col,
-            pb::decks::DeckTreeRequest {
-                now: anki::prelude::TimestampSecs::now().0,
-            },
-        )?)),
-        Command::Queue { limit } => {
-            let q = SchedulerService::get_queued_cards(
-                col,
-                pb::scheduler::GetQueuedCardsRequest {
-                    fetch_limit: limit,
-                    intraday_learning_only: false,
-                },
-            )?;
-            queued.clear();
-            let mut cards = Vec::new();
-            for c in q.cards {
-                let card = c
-                    .card
-                    .ok_or_else(|| CoreError::Other("Missing queued card".into()))?;
-                let states = c
-                    .states
-                    .ok_or_else(|| CoreError::Other("Missing scheduling states".into()))?;
-                let intervals = SchedulerService::describe_next_states(col, states.clone())?
-                    .vals
-                    .into_iter()
-                    .map(|s| anki_i18n::without_unicode_isolation(&s).to_string())
-                    .collect();
-                queued.insert(card.id, states);
-                let queue = match pb::scheduler::queued_cards::Queue::try_from(c.queue) {
-                    Ok(pb::scheduler::queued_cards::Queue::Learning) => QueueKind::Learning,
-                    Ok(pb::scheduler::queued_cards::Queue::Review) => QueueKind::Review,
-                    _ => QueueKind::New,
-                };
-                cards.push(QueuedCard {
-                    id: card.id,
-                    intervals,
-                    note_id: card.note_id,
-                    deck_id: card.deck_id,
-                    queue,
-                    flag: card.flags as u8 & 0b111,
-                    marked: false,
-                });
-            }
-            Response::Queue(Queue {
-                new: q.new_count,
-                learning: q.learning_count,
-                review: q.review_count,
-                cards,
-            })
-        }
+        Command::DeckTree => Response::DeckTree(deck(study::deck_tree(col)?)),
+        Command::Queue { limit } => Response::Queue(study::queue(col, limit, queued)?),
         Command::Answer {
             card_id,
             rating,
             answered_at_millis,
             milliseconds_taken,
-        } => {
-            let state = queued.get(&card_id).cloned().ok_or_else(|| {
-                CoreError::Invalid("Fetch a fresh queue before answering.".into())
-            })?;
-            let (new_state, rating) = match rating {
-                Rating::Again => (state.again, 0),
-                Rating::Hard => (state.hard, 1),
-                Rating::Good => (state.good, 2),
-                Rating::Easy => (state.easy, 3),
-            };
-            Response::Answered(AnswerOutcome {
-                changes: changes(SchedulerService::answer_card(
-                    col,
-                    pb::scheduler::CardAnswer {
-                        card_id,
-                        current_state: state.current,
-                        new_state,
-                        rating,
-                        answered_at_millis,
-                        milliseconds_taken,
-                    },
-                )?),
-                ..Default::default()
-            })
-        }
-        Command::Undo => {
-            let undone = CollectionService::undo(col)?;
-            Response::Undone {
-                changes: changes(undone.changes.unwrap_or_default()),
-                label: undone.operation,
-            }
-        }
+        } => Response::Answered(study::answer(
+            col,
+            queued,
+            card_id,
+            rating,
+            answered_at_millis,
+            milliseconds_taken,
+        )?),
+        Command::Undo => study::undone(CollectionService::undo(col)?),
+        Command::Redo => study::undone(CollectionService::redo(col)?),
+        Command::UndoStatus => Response::UndoStatus(study::undo_status(col)?),
         Command::Render { card_id } => Response::Rendered(render(col, card_id)?),
         Command::Search { query } => Response::CardIds(
             SearchService::search_cards(
@@ -363,16 +290,12 @@ fn execute(
         Command::GenerateFixture => {
             crate::fixture::populate(col)?;
             queued.clear();
-            Response::CardIds(
-                SearchService::search_cards(
-                    col,
-                    pb::search::SearchRequest {
-                        search: "".into(),
-                        order: None,
-                    },
-                )?
-                .ids,
-            )
+            Response::CardIds(all_cards(col)?)
+        }
+        Command::GenerateStudyFixture => {
+            crate::fixture::populate_study(col)?;
+            queued.clear();
+            Response::CardIds(all_cards(col)?)
         }
         // Needs to replace the collection, so the actor loop handles it.
         Command::Backup => {
@@ -380,13 +303,62 @@ fn execute(
                 "Backup is handled by the actor loop".into(),
             ))
         }
-        // Phase 1 core stream implements these.
-        command => {
-            return Err(CoreError::Invalid(format!(
-                "Not implemented yet: {command:?}"
-            )))
+        Command::SelectDeck { deck_id } => {
+            Response::Overview(study::select_deck(col, deck_id, queued)?)
         }
+        Command::Overview => Response::Overview(study::overview(col)?),
+        Command::SetDeckCollapsed { deck_id, collapsed } => {
+            Response::Changes(study::set_deck_collapsed(col, deck_id, collapsed)?)
+        }
+        Command::Congrats => Response::Congrats(study::congrats(col)?),
+        Command::StudiedToday => Response::Text(study::studied_today(col)?),
+        Command::SchedTiming => Response::SchedTiming(study::sched_timing(col)?),
+        Command::SchedulerStatus => Response::SchedulerStatus(study::scheduler_status(col)?),
+        Command::UpgradeScheduler => Response::Changes(study::upgrade_scheduler(col)?),
+        Command::StudyConfig { card_id } => {
+            Response::StudyConfig(study::study_config(col, card_id)?)
+        }
+        Command::CompareAnswer {
+            expected,
+            provided,
+            combining,
+        } => Response::Html(study::compare_answer(col, expected, provided, combining)?),
+        Command::SetFlag { card_ids, flag } => {
+            Response::Changes(study::set_flag(col, card_ids, flag)?)
+        }
+        Command::SetMarked { note_ids, marked } => {
+            Response::Changes(study::set_marked(col, note_ids, marked)?)
+        }
+        Command::BuryOrSuspend { target, mode } => {
+            Response::Changes(study::bury_or_suspend(col, target, mode)?)
+        }
+        Command::Unbury { deck_id, mode } => Response::Changes(study::unbury(col, deck_id, mode)?),
+        Command::ForgetDefaults => Response::ForgetDefaults(study::forget_defaults(col)?),
+        Command::Forget {
+            card_ids,
+            restore_position,
+            reset_counts,
+        } => Response::Changes(study::forget(
+            col,
+            card_ids,
+            restore_position,
+            reset_counts,
+        )?),
+        Command::SetDueDate { card_ids, days } => {
+            Response::Changes(study::set_due_date(col, card_ids, days)?)
+        }
+        Command::DeleteNotes { note_ids } => Response::Changes(study::delete_notes(col, note_ids)?),
     })
+}
+fn all_cards(col: &mut Collection) -> Result<Vec<i64>> {
+    Ok(SearchService::search_cards(
+        col,
+        pb::search::SearchRequest {
+            search: "".into(),
+            order: None,
+        },
+    )?
+    .ids)
 }
 /// Completes a partial render the way pylib's `apply_custom_filters` does
 /// (`pylib/anki/template.py`). Rust stops at the first filter it does not know
@@ -450,7 +422,8 @@ fn audio(tags: Vec<pb::card_rendering::AvTag>) -> Vec<AudioTag> {
 ///    tanki does not run LaTeX yet, so with generation on, a missing image is
 ///    left missing (pylib would generate it).
 fn render(col: &mut Collection, card_id: i64) -> Result<RenderedCard> {
-    use anki::services::{ConfigService, MediaService};
+    use anki::services::{CardsService, ConfigService, MediaService};
+    let card = CardsService::get_card(col, pb::cards::CardId { cid: card_id })?;
     let r = match CardRenderingService::render_existing_card(
         col,
         pb::card_rendering::RenderExistingCardRequest {
@@ -468,7 +441,8 @@ fn render(col: &mut Collection, card_id: i64) -> Result<RenderedCard> {
                 css: String::new(),
                 question_audio: vec![],
                 answer_audio: vec![],
-                ..Default::default()
+                ord: card.template_idx,
+                type_answer: None,
             });
         }
         Err(e) => return Err(e.into()),
@@ -516,13 +490,15 @@ fn render(col: &mut Collection, card_id: i64) -> Result<RenderedCard> {
     };
     let question = latex(q.text)?;
     let answer = latex(a.text)?;
+    let type_answer = study::type_answer(col, &card, &question)?;
     Ok(RenderedCard {
         question,
         answer,
         css: r.css,
         question_audio: audio(q.av_tags),
         answer_audio: audio(a.av_tags),
-        ..Default::default()
+        ord: card.template_idx,
+        type_answer,
     })
 }
 

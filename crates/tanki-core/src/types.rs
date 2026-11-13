@@ -332,6 +332,11 @@ pub enum Command {
     Backup,
     /// -> `CardIds` (all cards).
     GenerateFixture,
+    /// Adds the study fixture (`fixture::populate_study`): a deck tree under
+    /// "Study" with new, learning and due review cards, media, presets and a
+    /// filtered deck, and makes "Study" the current deck -> `CardIds` (all
+    /// cards of the collection).
+    GenerateStudyFixture,
 
     // Decks, overview, congrats.
     /// Makes `deck_id` the current deck -> `Overview`.
@@ -449,6 +454,17 @@ fn replace_type_placeholders(buf: &str, mut replace: impl FnMut(&str) -> String)
     }
     out.push_str(rest);
     found.then_some(out)
+}
+
+/// Inner text of the first `[[type:…]]` placeholder (`re.search` in
+/// `reviewer.py` `typeAnsQuestionFilter`).
+pub(crate) fn first_type_placeholder(buf: &str) -> Option<String> {
+    let mut first = None;
+    replace_type_placeholders(buf, |inner| {
+        first.get_or_insert_with(|| inner.to_owned());
+        String::new()
+    });
+    first
 }
 
 impl RenderedCard {
