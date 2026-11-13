@@ -93,6 +93,20 @@ def make_fixture(base: Path) -> Path:
     return Path(lines[-1]) / "collection.anki2"
 
 
+def checked_anki_version() -> str:
+    import anki.buildinfo
+
+    version = anki.buildinfo.version
+    if version != pinned_version():
+        fail(
+            f"anki {version} imported from "
+            f"{os.path.dirname(anki.buildinfo.__file__)}, but vendor/anki pins "
+            f"{pinned_version()}; set PYTHONPATH to the pinned build "
+            "(.tools/pinned-python)"
+        )
+    return version
+
+
 def av_tag(tag: object) -> dict:
     from anki.sound import SoundOrVideoTag, TTSTag
 
@@ -113,18 +127,11 @@ def av_tag(tag: object) -> dict:
 
 
 def render_all(collection: Path) -> dict:
-    import anki.buildinfo
     from anki.collection import Collection  # before anki.latex (import cycle)
 
     import anki.latex
 
-    version = anki.buildinfo.version
-    if version != pinned_version():
-        fail(
-            f"anki {version} imported from {os.path.dirname(anki.__file__)}, "
-            f"but vendor/anki pins {pinned_version()}; set PYTHONPATH to the "
-            "pinned build (.tools/pinned-python)"
-        )
+    version = checked_anki_version()
 
     def no_latex_binaries(*_args: object, **_kwargs: object) -> str | None:
         raise RuntimeError("golden-render must not run LaTeX; ship the image instead")
@@ -172,6 +179,7 @@ def main() -> None:
         "(default: generate one with xtask)",
     )
     args = parser.parse_args()
+    checked_anki_version()
 
     base: Path | None = None
     try:
