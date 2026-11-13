@@ -8,3 +8,12 @@ publish.workspace = true
 [[bin]]
 name = "tanki"
 path = "src/main.rs"
+
+[dependencies]
+tanki-core = { path = "../tanki-core" }
+tanki-term = { path = "../tanki-term" }
+serde_json = "1"
+clap = { version = "4.5", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3"

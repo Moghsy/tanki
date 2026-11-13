@@ -2,3 +2,6 @@
 /.tools/
 /.worktrees/
 /protoc-*.zip
+
+/xtask/bootstrap/target/
+/scripts/__pycache__/

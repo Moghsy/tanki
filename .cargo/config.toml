@@ -1,5 +1,5 @@
 [alias]
-xtask = "run --package xtask --"
+xtask = "run --manifest-path xtask/bootstrap/Cargo.toml --"
 
 [env]
 PROTOC = { value = "protoc", force = false }

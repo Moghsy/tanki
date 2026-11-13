@@ -35,13 +35,10 @@ impl CollectionActor {
                     safety::peek_and_backup(&profile)?;
                     std::fs::create_dir_all(profile.join("collection.media"))?;
                     std::fs::create_dir_all(profile.join("backups"))?;
-                    let mut col = CollectionBuilder::new(profile.join("collection.anki2"))
-                        .set_media_paths(
-                            profile.join("collection.media"),
-                            profile.join("collection.media.db2"),
-                        )
-                        .build()?;
-                    if let Err(error) = backup(&mut col, &profile) {
+                    let col = open_collection(&profile)?;
+                    // Backup failure fails the open: no command runs unbacked.
+                    let (col, saved) = backup_and_relock(col, &profile)?;
+                    if let Err(error) = saved {
                         let _ = col.close(None);
                         return Err(error);
                     }
@@ -59,7 +56,22 @@ impl CollectionActor {
                 };
                 let mut queued = HashMap::new();
                 for (command, reply) in receiver {
-                    let result = execute(&mut col, &profile, command, &mut queued);
+                    if matches!(command, Command::Backup) {
+                        queued.clear();
+                        match backup_and_relock(col, &profile) {
+                            Ok((reopened, saved)) => {
+                                col = reopened;
+                                let _ = reply.send(saved.map(|()| Response::Backup));
+                            }
+                            // The collection could not be reopened; stop the actor.
+                            Err(error) => {
+                                let _ = reply.send(Err(error.clone()));
+                                return Err(error);
+                            }
+                        }
+                        continue;
+                    }
+                    let result = execute(&mut col, command, &mut queued);
                     if let Ok(Response::Changes(changes) | Response::NoteAdded { changes, .. }) =
                         &result
                     {
@@ -70,8 +82,9 @@ impl CollectionActor {
                     }
                     let _ = reply.send(result);
                 }
-                // Backups are joined synchronously; no background backup survives this loop.
-                let saved = backup(&mut col, &profile);
+                // The exit backup is joined before close, so no backup thread
+                // outlives the actor. No relock is needed: the collection closes next.
+                let saved = backup(&mut col, &profile).map(|_| ());
                 let closed = col.close(None).map_err(CoreError::from);
                 saved.and(closed)
             })?;
@@ -131,13 +144,49 @@ impl From<anki::error::AnkiError> for CoreError {
         }
     }
 }
-fn backup(col: &mut Collection, profile: &Path) -> Result<()> {
-    if let Some(handle) = col.maybe_backup(profile.join("backups"), true)? {
-        handle
-            .join()
-            .map_err(|_| CoreError::Other("Backup worker panicked".into()))??;
+/// The only place a collection is built, so every reopen uses the same paths.
+fn open_collection(profile: &Path) -> Result<Collection> {
+    Ok(CollectionBuilder::new(profile.join("collection.anki2"))
+        .set_media_paths(
+            profile.join("collection.media"),
+            profile.join("collection.media.db2"),
+        )
+        .build()?)
+}
+/// Forces a backup and waits for its thread. Returns whether Anki read the
+/// collection file, which is the step that loses the file lock (see below).
+fn backup(col: &mut Collection, profile: &Path) -> Result<bool> {
+    match col.maybe_backup(profile.join("backups"), true) {
+        Ok(Some(handle)) => {
+            handle
+                .join()
+                .map_err(|_| CoreError::Other("Backup worker panicked".into()))??;
+            Ok(true)
+        }
+        Ok(None) => Ok(false),
+        Err(error) => Err(error.into()),
     }
-    Ok(())
+}
+/// Backs up, then closes and reopens the collection.
+///
+/// Anki's `maybe_backup` reads `collection.anki2` through a second file
+/// descriptor. On POSIX, closing any descriptor of a file releases every
+/// `fcntl` lock the process holds on it, so after a backup other processes can
+/// open the collection although this one still has it open (verified against
+/// 25.09.4 and the pinned core; `tests/lock_across_processes.rs`). SQLite
+/// only takes the lock when a connection first touches the database, so a fresh
+/// connection is the only way to get it back.
+///
+/// The outer error means the collection is gone (another process took it in
+/// the gap, or reopening failed). The inner result is the backup's outcome.
+/// Reopening discards undo history.
+fn backup_and_relock(mut col: Collection, profile: &Path) -> Result<(Collection, Result<()>)> {
+    let saved = backup(&mut col, profile);
+    if matches!(saved, Ok(false)) {
+        return Ok((col, Ok(())));
+    }
+    col.close(None)?;
+    Ok((open_collection(profile)?, saved.map(|_| ())))
 }
 fn changes(c: pb::collection::OpChanges) -> OpChanges {
     OpChanges {
@@ -167,7 +216,6 @@ fn deck(d: pb::decks::DeckTreeNode) -> Deck {
 }
 fn execute(
     col: &mut Collection,
-    profile: &Path,
     command: Command,
     queued: &mut HashMap<i64, pb::scheduler::SchedulingStates>,
 ) -> Result<Response> {
@@ -291,9 +339,11 @@ fn execute(
                 .ids,
             )
         }
+        // Needs to replace the collection, so the actor loop handles it.
         Command::Backup => {
-            backup(col, profile)?;
-            Response::Backup
+            return Err(CoreError::Invalid(
+                "Backup is handled by the actor loop".into(),
+            ))
         }
     })
 }

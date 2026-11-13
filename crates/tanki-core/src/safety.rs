@@ -5,10 +5,29 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Every place a real Anki base can live on this machine (R5 §1.1). These are
+/// refused during development even when `TANKI_ALLOW_REAL_PROFILE=1` is set;
+/// both checks go away at Phase 2 exit (PLAN section 14 rule 2).
+fn real_bases() -> Vec<PathBuf> {
+    let var = |name: &str| {
+        std::env::var_os(name)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+    };
+    let mut bases = Vec::new();
+    if let Some(home) = var("HOME") {
+        bases.push(home.join(".local/share/Anki2"));
+        bases.push(home.join(".var/app/net.ankiweb.Anki/data/Anki2"));
+    }
+    if let Some(data) = var("XDG_DATA_HOME") {
+        bases.push(data.join("Anki2"));
+    }
+    bases.extend(var("ANKI_BASE"));
+    bases
+}
+
 fn forbidden(path: &Path) -> bool {
-    std::env::var_os("HOME")
-        .is_some_and(|home| path.starts_with(PathBuf::from(home).join(".local/share/Anki2")))
-        || std::env::var_os("ANKI_BASE").is_some_and(|base| path.starts_with(base))
+    real_bases().iter().any(|base| path.starts_with(base))
         || path
             .components()
             .any(|c| c.as_os_str() == "prefs21.db" || c.as_os_str() == "addons21")
@@ -36,7 +55,12 @@ pub fn validate_profile(path: &Path) -> Result<PathBuf> {
     }
     // Require an existing directory so canonicalization cannot overlook symlink ancestors.
     let canonical = absolute.canonicalize()?;
-    if forbidden(&canonical) {
+    // Compare again with symlinks in the bases' parents resolved. Only the
+    // parent is resolved, so nothing inside a real base is ever touched.
+    let resolved_bases = real_bases()
+        .into_iter()
+        .filter_map(|base| Some(base.parent()?.canonicalize().ok()?.join(base.file_name()?)));
+    if forbidden(&canonical) || resolved_bases.into_iter().any(|b| canonical.starts_with(b)) {
         return Err(CoreError::UnsafePath(
             "Profile resolves to a forbidden Anki path.".into(),
         ));
@@ -94,8 +118,10 @@ pub(crate) fn peek_and_backup(profile: &Path) -> Result<()> {
         return Err(CoreError::SchemaTooNew(version));
     }
     if version < 18 {
-        // The active SELECT retains a read lock during the copy. Refuse WAL data
-        // rather than silently omitting uncheckpointed pages from an old fixture.
+        // The active SELECT holds a read lock while the bytes are read. (Closing
+        // the copy's descriptor then drops that lock, as POSIX locks do; nothing
+        // reads after that point.) Refuse WAL data rather than silently omitting
+        // uncheckpointed pages.
         if fs::metadata(profile.join("collection.anki2-wal")).is_ok_and(|m| m.len() > 0) {
             return Err(CoreError::Invalid(
                 "Close the older client cleanly before upgrading this collection (nonempty WAL)."
