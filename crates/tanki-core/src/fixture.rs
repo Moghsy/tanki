@@ -760,6 +760,20 @@ pub(crate) fn populate_study(col: &mut Collection) -> Result<()> {
     }];
     let _ = DecksService::add_or_update_filtered_deck(col, filtered)?;
 
+    // Persisted custom data must survive answers unchanged when no custom
+    // scheduler is installed. Cover both new and review cards in the replay.
+    for id in search(col, "tag:study::flag or tag:study::review-7")? {
+        let mut card = CardsService::get_card(col, pb::cards::CardId { cid: id })?;
+        card.custom_data = r#"{"fixture":"study","counter":7}"#.into();
+        let _ = CardsService::update_cards(
+            col,
+            pb::cards::UpdateCardsRequest {
+                cards: vec![card],
+                skip_undo_entry: false,
+            },
+        )?;
+    }
+
     let _ = DecksService::set_current_deck(
         col,
         pb::decks::DeckId {

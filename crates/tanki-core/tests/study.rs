@@ -7,7 +7,7 @@
 use anki::{
     collection::{Collection, CollectionBuilder},
     notetype::{CardTemplate, Notetype},
-    services::{ConfigService, NotesService},
+    services::{CardsService, ConfigService, NotesService, StatsService},
 };
 use anki_proto as pb;
 use std::path::Path;
@@ -287,6 +287,75 @@ fn answer_reports_leech_and_suspension_and_undo_redo() {
     let q = queue(&actor, 1);
     let outcome = answer(&actor, q.cards[0].id, Rating::Good);
     assert!(!outcome.leech && !outcome.suspended);
+}
+
+#[test]
+fn answer_preserves_custom_data_caps_time_and_redoes_the_same_timestamp() {
+    let (dir, actor) = study();
+    select(&actor, "Study::Vocabulary::French");
+    let book = one(&actor, "\"le livre\" card:1");
+    assert!(queue(&actor, 100).cards.iter().any(|c| c.id == book));
+    let answered_at = now_millis();
+    let Response::Answered(_) = actor
+        .execute(Command::Answer {
+            card_id: book,
+            rating: Rating::Good,
+            answered_at_millis: answered_at,
+            milliseconds_taken: 90_001,
+        })
+        .unwrap()
+    else {
+        panic!("Answer")
+    };
+    actor.execute(Command::Undo).unwrap();
+    assert!(search(&actor, "\"le livre\" card:1 is:new").contains(&book));
+    actor.execute(Command::Redo).unwrap();
+    actor.close().unwrap();
+
+    // Inspect only after the actor has joined and closed its collection.
+    prepare(dir.path(), |col| {
+        let card = CardsService::get_card(col, pb::cards::CardId { cid: book }).unwrap();
+        assert_eq!(card.custom_data, r#"{"fixture":"study","counter":7}"#);
+        assert_eq!(card.last_review_time_secs, Some(answered_at / 1000));
+        assert_eq!(card.reps, 1);
+        let log = StatsService::get_review_logs(col, pb::cards::CardId { cid: book }).unwrap();
+        assert_eq!(log.entries.len(), 1, "undo/redo keeps one review log");
+        let entry = &log.entries[0];
+        assert_eq!(entry.time, answered_at / 1000);
+        assert_eq!(entry.taken_secs, 60.0, "backend caps uncapped input");
+        assert_eq!(entry.button_chosen, 3);
+    });
+}
+
+#[test]
+fn bury_and_suspend_card_and_note_are_undoable() {
+    let (_dir, actor) = study();
+    select(&actor, "Study::Vocabulary::French");
+    let book = one(&actor, "\"le livre\" card:1");
+    let note = queue(&actor, 100)
+        .cards
+        .iter()
+        .find(|c| c.id == book)
+        .unwrap()
+        .note_id;
+    for (mode, state) in [
+        (BuryMode::Bury, "is:buried"),
+        (BuryMode::Suspend, "is:suspended"),
+    ] {
+        for (target, count) in [
+            (Target::Cards(vec![book]), 1),
+            (Target::Notes(vec![note]), 2),
+        ] {
+            let query = format!("\"le livre\" {state}");
+            changes(actor.execute(Command::BuryOrSuspend { target, mode }));
+            assert_eq!(search(&actor, &query).len(), count);
+            actor.execute(Command::Undo).unwrap();
+            assert!(search(&actor, &query).is_empty());
+            actor.execute(Command::Redo).unwrap();
+            assert_eq!(search(&actor, &query).len(), count);
+            actor.execute(Command::Undo).unwrap();
+        }
+    }
 }
 
 #[test]
