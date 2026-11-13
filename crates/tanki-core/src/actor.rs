@@ -359,3 +359,7 @@ fn render(col: &mut Collection, card_id: i64) -> Result<RenderedCard> {
         answer_audio: audio(a.av_tags),
     })
 }
+
+#[cfg(test)]
+#[path = "sync_spike.rs"]
+mod sync_spike;

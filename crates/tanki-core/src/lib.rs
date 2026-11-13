@@ -3,9 +3,11 @@
 mod actor;
 mod fixture;
 mod safety;
+mod sync;
 mod types;
 pub use actor::CollectionActor;
 pub use safety::validate_profile;
+pub use sync::SyncEndpoint;
 pub use types::*;
 
 #[cfg(test)]
