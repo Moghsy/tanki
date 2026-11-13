@@ -355,6 +355,7 @@ impl App<'_> {
     // ---- reviewer ----------------------------------------------------------
 
     fn draw_review(&mut self, frame: &mut Frame, area: Rect) {
+        let show_images = self.overlay.is_none();
         let warning = match &self.screen {
             Screen::Review(view) => view.warning.clone(),
             _ => return,
@@ -406,6 +407,9 @@ impl App<'_> {
         self.services.renderer.paint(card, scroll, card_area, buf);
         // Images fully inside the viewport.
         for block in &card.images {
+            if !show_images {
+                continue;
+            }
             if block.row < scroll {
                 continue;
             }

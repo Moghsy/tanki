@@ -23,7 +23,7 @@ struct Args {
     /// Print machine-readable output for commands such as decks.
     #[arg(long, global = true)]
     json: bool,
-    /// JSON array of {scope, key, action} overrides; help lists active keys.
+    /// JSON array of {scope, key, action} overrides; null action unbinds a key.
     #[arg(long, global = true)]
     keymap: Option<PathBuf>,
     #[command(subcommand)]
@@ -111,6 +111,10 @@ fn load_keymap(path: Option<&Path>) -> Result<Keymap> {
             };
             let scope = Scope::from_name(value("scope")?).ok_or("unknown keymap scope")?;
             let chord = Chord::parse(value("key")?).ok_or("unknown keymap key")?;
+            if row.get("action").is_some_and(serde_json::Value::is_null) {
+                map.unbind(scope, chord);
+                continue;
+            }
             let action = Action::from_name(value("action")?).ok_or("unknown keymap action")?;
             map.bind(scope, chord, action);
         }
@@ -224,5 +228,33 @@ fn main() -> std::process::ExitCode {
                 std::process::ExitCode::FAILURE
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn keymap_overrides_and_unbinds_are_reflected_in_hints() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("keys.json");
+        std::fs::write(
+            &path,
+            r#"[
+            {"scope":"review","key":"space","action":null},
+            {"scope":"review","key":"enter","action":null},
+            {"scope":"review","key":"f8","action":"show-answer"}
+        ]"#,
+        )
+        .unwrap();
+        let map = load_keymap(Some(&path)).unwrap();
+        assert_eq!(
+            map.hint(&[Scope::Review, Scope::Global], Action::ShowAnswerOrGood),
+            "F8"
+        );
+        assert_eq!(
+            map.lookup(&[Scope::Review], &Chord::parse("space").unwrap()),
+            None
+        );
     }
 }

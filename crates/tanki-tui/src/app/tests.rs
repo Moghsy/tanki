@@ -203,9 +203,9 @@ fn palette_remapping_help_and_quit_work_across_overlays() {
     a.handle(
         AppEvent::Key(
             KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL),
-            now.at,
+            now.plus_millis(100).at,
         ),
-        now,
+        now.plus_millis(100),
     );
     assert!(a.should_quit());
 }
@@ -434,10 +434,16 @@ fn browser_escape_hatch_opens_the_active_side_and_reports_opener_errors() {
     assert!(html.contains("<base href=\"file:///tmp/tanki-test-profile/collection.media/\">"));
     a.dispatch(Action::ShowAnswerOrGood);
     a.dispatch(Action::OpenInBrowser);
+    std::fs::remove_file(path).unwrap();
+    let path = opened.borrow().clone().unwrap();
     let html = std::fs::read_to_string(&path).unwrap();
     assert!(html.contains("Browser A"));
     std::fs::remove_file(path).unwrap();
-    a.services.opener = Box::new(|_| Err(std::io::Error::other("no browser")));
+    let record = opened.clone();
+    a.services.opener = Box::new(move |path| {
+        *record.borrow_mut() = Some(path.to_owned());
+        Err(std::io::Error::other("no browser"))
+    });
     a.dispatch(Action::OpenInBrowser);
     assert!(a.visible_message().unwrap().text.contains("no browser"));
     std::fs::remove_file(opened.borrow().as_ref().unwrap()).unwrap();

@@ -296,6 +296,8 @@ impl<'a> App<'a> {
     fn clear_images(&mut self) {
         self.services.images.clear();
         self.cleanup.push_str(&self.services.images.take_cleanup());
+        // Erase Sixel/iTerm placements too; repaint every cell next frame.
+        self.full_redraw = true;
     }
 
     // ---- screens -----------------------------------------------------------
@@ -431,11 +433,19 @@ impl<'a> App<'a> {
     /// Runs a reviewer method and applies its effects.
     fn with_reviewer(&mut self, f: impl FnOnce(&mut Reviewer, &dyn Backend, Now) -> Vec<Effect>) {
         let now = self.now;
+        let started = Instant::now();
+        let was_answer =
+            matches!(&self.screen, Screen::Review(view) if view.reviewer.phase() == Phase::Answer);
         let fx = match &mut self.screen {
             Screen::Review(view) => f(&mut view.reviewer, &self.backend, now),
             _ => return,
         };
         self.apply(fx);
+        if was_answer
+            && !matches!(&self.screen, Screen::Review(view) if view.reviewer.phase() == Phase::Answer)
+        {
+            self.ignore_keys_before = Some(now.at + started.elapsed());
+        }
     }
 
     fn apply(&mut self, fx: Vec<Effect>) {
@@ -684,6 +694,7 @@ impl<'a> App<'a> {
                     }
                     view.render = None;
                 }
+                self.clear_images();
             }
             WidgetKind::TypeAnswer => {
                 if let Some(view) = self.review() {
@@ -1138,6 +1149,7 @@ impl<'a> App<'a> {
                     }
                 }
                 view.render = None;
+                self.clear_images();
             }
             Action::FocusInput => {
                 if view.reviewer.typed().is_some() {

@@ -507,15 +507,14 @@ pub trait ImageDisplay {
 /// tanki-render's decoder + tanki-term's protocols.
 pub struct TermImages {
     images: tanki_term::Images,
-    /// `None` while tanki-render's cache is not available.
-    cache: Option<tanki_render::ImageCache>,
+    cache: tanki_render::ImageCache,
     cell_px: (u16, u16),
 }
 
 impl TermImages {
     pub fn new(
         images: tanki_term::Images,
-        cache: Option<tanki_render::ImageCache>,
+        cache: tanki_render::ImageCache,
         cell_px: Option<(u16, u16)>,
     ) -> Self {
         Self {
@@ -524,8 +523,8 @@ impl TermImages {
             cell_px: cell_px.unwrap_or((10, 20)),
         }
     }
-    pub fn subscribe(&self) -> Option<std::sync::mpsc::Receiver<()>> {
-        self.cache.as_ref().map(|c| c.subscribe())
+    pub fn subscribe(&self) -> std::sync::mpsc::Receiver<()> {
+        self.cache.subscribe()
     }
 }
 
@@ -537,9 +536,7 @@ impl ImageDisplay for TermImages {
         self.images.cycle()
     }
     fn draw(&mut self, source: &ImageSource, area: Rect, buf: &mut Buffer) -> ImageState {
-        let Some(cache) = &self.cache else {
-            return ImageState::Failed("image decoding is not available yet".into());
-        };
+        let cache = &self.cache;
         let max_px = (
             u32::from(area.width) * u32::from(self.cell_px.0),
             u32::from(area.height) * u32::from(self.cell_px.1),
@@ -693,8 +690,15 @@ pub fn card_page(side: &CardSide) -> String {
 
 /// Writes the page into the system temp folder (never the profile).
 pub fn write_card_page(side: &CardSide, card_id: i64, profile: &Path) -> std::io::Result<PathBuf> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
     let dir = std::env::temp_dir();
-    let path = dir.join(format!("tanki-card-{}-{card_id}.html", std::process::id()));
+    let path = dir.join(format!(
+        "tanki-card-{}-{card_id}-{}.html",
+        std::process::id(),
+        SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
     if let (Ok(p), Ok(d)) = (profile.canonicalize(), dir.canonicalize()) {
         if d.starts_with(&p) {
             return Err(std::io::Error::other(
@@ -702,7 +706,14 @@ pub fn write_card_page(side: &CardSide, card_id: i64, profile: &Path) -> std::io
             ));
         }
     }
-    std::fs::write(&path, card_page(side))?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(&path)?.write_all(card_page(side).as_bytes())?;
     Ok(path)
 }
 

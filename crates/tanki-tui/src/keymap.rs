@@ -472,6 +472,11 @@ impl Keymap {
             action,
         });
     }
+    /// Removes a default or user binding (JSON `action: null`).
+    pub fn unbind(&mut self, scope: Scope, chord: Chord) {
+        self.bindings
+            .retain(|binding| binding.scope != scope || binding.chord != chord);
+    }
     /// The action for `chord`, trying `scopes` in order.
     pub fn lookup(&self, scopes: &[Scope], chord: &Chord) -> Option<Action> {
         scopes.iter().find_map(|scope| {
@@ -694,6 +699,8 @@ mod tests {
         assert_eq!(km.lookup(&[Scope::Review], &x), Some(Action::Good));
         km.bind(Scope::Review, x, Action::Easy);
         assert_eq!(km.lookup(&[Scope::Review], &x), Some(Action::Easy));
+        km.unbind(Scope::Review, x);
+        assert_eq!(km.lookup(&[Scope::Review], &x), None);
         assert!(Keymap::from_rows(&[("nowhere", "x", "good")]).is_err());
         assert!(Keymap::from_rows(&[("review", "x", "fly")]).is_err());
     }

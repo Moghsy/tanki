@@ -1,10 +1,11 @@
 //! The collection as the TUI sees it: a synchronous command channel
 //! (`CollectionActor` in production, a fake in tests) plus typed helpers.
 use std::cell::Cell;
+#[cfg(test)]
+use tanki_core::{AnswerAction, QuestionAction};
 use tanki_core::{
-    AnswerAction, AnswerOutcome, CollectionActor, Command, Congrats, CoreError, Deck, DeckOverview,
-    OpChanges, QuestionAction, Queue, Rating, RenderedCard, Response, SchedTiming, SchedulerStatus,
-    StudyConfig,
+    AnswerOutcome, CollectionActor, Command, Congrats, CoreError, Deck, DeckOverview, OpChanges,
+    Queue, Rating, RenderedCard, Response, SchedTiming, SchedulerStatus, StudyConfig,
 };
 
 pub type Result<T> = tanki_core::Result<T>;
@@ -139,13 +140,8 @@ pub fn forget_defaults(b: &dyn Backend) -> Result<tanki_core::ForgetDefaults> {
     expect!(b, Command::ForgetDefaults, Response::ForgetDefaults(d) => d)
 }
 
-/// The core stream answers commands it has not built yet with this error.
-pub fn not_implemented(error: &CoreError) -> bool {
-    matches!(error, CoreError::Invalid(message) if message.starts_with("Not implemented yet"))
-}
-
-/// Anki's defaults (deck preset and collection preferences), used while
-/// `StudyConfig` is not available from the core.
+/// Anki's defaults, for the synthetic backend. Study uses actual settings.
+#[cfg(test)]
 pub fn fallback_study_config() -> StudyConfig {
     StudyConfig {
         autoplay: true,
@@ -320,8 +316,5 @@ mod tests {
             error.to_string(),
             "Unexpected response from the collection: Text"
         );
-        assert!(not_implemented(&CoreError::Invalid(
-            "Not implemented yet: Overview".into()
-        )));
     }
 }

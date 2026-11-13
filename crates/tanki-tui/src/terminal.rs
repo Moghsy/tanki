@@ -56,7 +56,7 @@ pub fn run(actor: &CollectionActor, options: Options) -> io::Result<()> {
     let audio_events = audio.subscribe();
     let images = TermImages::new(
         tanki_term::Images::new(&capabilities),
-        Some(tanki_render::ImageCache::new()),
+        tanki_render::ImageCache::new(),
         capabilities.cell_px,
     );
     let image_events = images.subscribe();
@@ -92,10 +92,8 @@ pub fn run(actor: &CollectionActor, options: Options) -> io::Result<()> {
             while let Ok(audio) = audio_events.try_recv() {
                 app.handle(AppEvent::Audio(audio), Now::current());
             }
-            if let Some(events) = &image_events {
-                if events.try_iter().next().is_some() {
-                    app.handle(AppEvent::ImageReady, Now::current());
-                }
+            if image_events.try_iter().count() > 0 {
+                app.handle(AppEvent::ImageReady, Now::current());
             }
             app.handle(AppEvent::Tick, Now::current());
             let (cleanup, clear) = app.take_terminal_requests();
