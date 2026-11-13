@@ -1,4 +1,4 @@
-//! tanki core: Phase 0 workspace foundation.
+//! Collection actor, study commands and adapters to the pinned Anki core.
 
 mod actor;
 mod fixture;

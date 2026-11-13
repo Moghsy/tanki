@@ -1,6 +1,6 @@
 # tanki
 
-A terminal Anki client in Rust. The study MVP is implemented; Phase 1's terminal acceptance check is pending. Development still uses temporary fixture profiles until Phase 2's data-safety checks pass.
+A terminal Anki client in Rust. Phase 1's study MVP and fixture acceptance checks are complete. Development still uses temporary fixture profiles until Phase 2's data-safety checks pass.
 
 Licensed under AGPL-3.0-or-later.
 
