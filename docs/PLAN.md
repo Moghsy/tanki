@@ -83,7 +83,7 @@ Consequences the implementer must handle:
 | Thing | Why | Substitute |
 |---|---|---|
 | Anki add-ons (150 GUI hooks + 17 core hooks, R4) | They are Python against Qt | AnkiConnect-compatible HTTP API (8.14); native versions of the popular ones (heatmap, TTS) |
-| Running alongside Anki desktop on the same profile | Exclusive SQLite lock **[R5 reproduced]** | Clear "Anki has this profile open" message; sequential use is fine |
+| Running alongside Anki desktop on the same profile | Exclusive SQLite lock **[R5 reproduced in one process; across processes it holds only until the holder's first backup, see 4.4 correction]** | Clear "Anki has this profile open" message; sequential use is fine |
 | AnkiWeb sync | Its terms exclude third-party clients (R9) | Self-hosted sync only (decision 2, 8.9) |
 | Card JavaScript in text mode | No DOM | Optional headless-browser tier (T3); non-interactive |
 | Clicking inside JS-driven cards | Would need to forward input to a browser | Out of scope; "open in browser" |
@@ -187,7 +187,7 @@ Dependency direction: `tanki-cli` → `tanki-tui`, `tanki-connect` → `tanki-re
 - **Own a `Collection` directly and call the generated service traits** (`anki::services::SchedulerService` etc.) with `anki_proto` messages. All 18 collection services are public and implemented for `Collection` **[spike]**. Going through the `Backend` object instead would force untyped byte calls for collection operations, because its typed forwarding methods are private **[spike: confirmed in generated code]**.
 - Call traits in the fully qualified form (`SchedulerService::answer_card(&mut col, req)`). Inherent methods with the same names shadow them (R1).
 - Strip U+2068/U+2069 isolation marks from translated strings with `anki_i18n::without_unicode_isolation` (R1).
-- The `Backend`-only layer is rebuilt in `tanki-core` from public functions: `sync_login`, `normal_sync`, `full_upload`, `full_download`, `sync_media`, `maybe_backup` (R1 §4–5, §9). R5 recommended `Backend` for these; R1 found the underlying functions public. **Phase 0 confirms by syncing against a local server.**
+- The `Backend`-only layer is rebuilt in `tanki-core` from public functions: `sync_login`, `normal_sync`, `full_upload`, `full_download`, `sync_media`, `maybe_backup` (R1 §4–5, §9). R5 recommended `Backend` for these; R1 found the underlying functions public. **Confirmed in Phase 0 spike A against the in-process server.** Two traps: the `SyncAuth` that `sync_login` returns has no endpoint, and no endpoint means AnkiWeb, so tanki always rebuilds the auth with its configured endpoint; and Anki follows a server's 308 `Location` to any host by itself, so the configured-URL check alone does not keep requests away from AnkiWeb (8.9).
 - R1 §3 is the master inventory: 205 collection RPCs in 18 services, 37 `Backend` RPCs in 11 services. The 26 `FrontendService` RPCs are Qt callbacks and do not exist in Rust.
 
 Known gaps (R1):
@@ -196,9 +196,9 @@ Known gaps (R1):
 |---|---|---|
 | Progress values sit in a private module | No structured progress bars for sync, import, FSRS optimise | Patch 0001 (4.1). If the patch fails to compile, fall back to handing the collection to a temporary `Backend` for long operations; its `latest_progress()` is typed **[spike]** |
 | `transact` is private, no raw SQL | tanki cannot build its own atomic/undoable operations | Compose from existing RPCs only; this is also a safety benefit |
-| Aborting a native sync may leave a transaction open | Possible inconsistent in-memory state | Treat abort as close-and-reopen |
+| Aborting a native sync may leave a transaction open | Possible inconsistent in-memory state | **[spike A]** Abort by setting `want_abort`: upstream returns `Interrupted`, rolls back and tells the server, and the same connection keeps working. Only when the sync future is dropped instead is close-and-reopen needed; that also works |
 | Some return types cannot be named outside the crate | Minor | Use the proto types from the service traits |
-| The client version string sent to sync servers is fixed by Anki (`anki,<version> (<buildhash>),<platform>`) | Cannot be customised except through the `BUILDHASH` build env and `PLATFORM` runtime env | Leave Anki's format so Anki's own server code parses it; set `BUILDHASH` to a tanki identifier **[unverified that the server accepts arbitrary hashes; check in Phase 0]** |
+| The client version string sent to sync servers is fixed by Anki (`anki,<version> (<buildhash>),<platform>`) | Cannot be customised except through the `BUILDHASH` build env and `PLATFORM` runtime env | Leave Anki's format. **[spike A]** `BUILDHASH` cannot be set from tanki's build: `rslib/build.rs` always overrides it from `vendor/anki/out/buildhash`, and without that file the hash is empty (`anki,26.08.1 (),linux`). The server only logs the string and accepted it. Identify tanki through `PLATFORM` at runtime instead |
 
 ### 4.4 Collection actor and concurrency
 
@@ -210,6 +210,9 @@ Known gaps (R1):
 **Sharing the profile with Anki desktop (decision 3) — mandatory rules** (R5)
 
 - The database opens with `locking_mode=exclusive`, WAL, `busy_timeout(0)`. The second opener fails immediately with a "locked" error; R5 reproduced this on a copy. tanki maps that error to: "This profile is open in Anki (or another tanki). Close it and try again." with its own exit code.
+- **Correction (Phase 0, 2026-11-13; the source wins over R5).** The lock does not last for the holder's whole session. `Collection::maybe_backup` reads `collection.anki2` through a second file descriptor (`anki_io::read_locked_db_file`), and on POSIX closing any descriptor of a file releases every `fcntl` lock the process holds on it. After its first backup a process still has the collection open but other processes can open it too; later writes do not take the lock back. Reproduced with two processes against Anki 25.09.4, the pinned core and 26.09.4 (`crates/tanki-core/tests/lock_across_processes.rs`). R5's check used two connections in one process, where SQLite's own bookkeeping hides this.
+  - tanki's side is fixed: the actor closes and reopens the collection after every backup it writes (`backup_and_relock`), which is the only way to take the lock again. Cost: undo history does not survive a backup. Nothing in tanki may open `collection.anki2` with plain file I/O while the collection is open.
+  - Desktop's side cannot be fixed from here: Anki desktop backs up on a timer (every 30 minutes by default when something changed), so a desktop session that has made a backup no longer blocks tanki from opening the same profile. **The "locked" error is therefore not a reliable sign that desktop is closed.** Phase 2 needs a second check before the real profile is opened (open question for the user; candidates: refuse when `collection.anki2-wal` exists before tanki's own peek; look for a process holding the file under `/proc`; probe Anki's single-instance socket), and the bug should be reported upstream.
 - Not covered by that lock: collection-package restore and full-sync download rename a file over `collection.anki2`; the media folder and media DB have no cross-process protection. tanki only performs those while it holds the collection lock itself, and backs up first.
 - **Media paths:** call `set_media_paths("<profile>/collection.media", "<profile>/collection.media.db2")` explicitly. Never use `with_desktop_media_paths()`: it uses a different DB filename and would silently fork media sync state (R1, R5). Media trash is `<profile>/media.trash`.
 - **Never read or write `prefs21.db`.** It holds Python pickles with Qt enum objects, and Anki resets a profile whose pickle fails to load (R5). Profiles are discovered by listing folders under the base that contain `collection.anki2`.
@@ -610,10 +613,10 @@ Tasks, in order (mostly sequential; little to parallelise):
 - [x] Write patch 0001 and prove it compiles; if it cannot, implement the `Backend` hand-over fallback (4.3) and record the outcome in this plan.
 - [x] `tanki-core`: collection actor (thread + channels), open/close with explicit media paths, typed commands for deck tree, queued cards, render, answer, undo; `OpChanges` broadcast.
 - [x] Fixture generator in `xtask`: builds synthetic collections in a temp folder using only tanki-core (notes of every stock note type, media files, a few reviews).
-- [ ] Guard: the binary refuses to open a base folder that is not a temp/fixture folder unless `TANKI_ALLOW_REAL_PROFILE=1` is set (removed at Phase 2 exit; see section 14).
-- [ ] Spike A — sync with public functions only: run Anki's `SimpleServer` in-process on a temp folder, then login, normal sync, full upload, full download, media sync, abort. Record what worked.
+- [x] Guard: the binary refuses to open a base folder that is not a temp/fixture folder unless `TANKI_ALLOW_REAL_PROFILE=1` is set (removed at Phase 2 exit; see section 14).
+- [x] Spike A — sync with public functions only: run Anki's `SimpleServer` in-process on a temp folder, then login, normal sync, full upload, full download, media sync, abort. Record what worked.
 - [ ] Spike B — golden render harness: script that renders every fixture card with Anki's Python package at the pinned version and stores question/answer HTML plus audio-tag lists; a Rust test compares tanki-core's pipeline (6.0). Settle `partial_render`.
-- [ ] Spike C — schema edges: open a schema-11 fixture (upgrade path and pre-upgrade copy); behaviour with a schema newer than supported (simulate by editing a copy's version field).
+- [x] Spike C — schema edges: open a schema-11 fixture (upgrade path and pre-upgrade copy); behaviour with a schema newer than supported (simulate by editing a copy's version field).
 - [ ] Spike D — desktop version skew: have the 25.09.4 Python package open and save a fixture collection written by tanki-core (deck config edited, cards answered); diff what changed. Document any dropped fields.
 - [x] Spike E — `tanki doctor`: capability probe (5.2) and a test image through each protocol. The user runs it in herdr, kitty and Ghostty and reports what displays; the agent cannot see the terminal.
 - [ ] Evaluate bumping the pin to the newest stable upstream tag; keep the bump only if everything above still passes.
@@ -739,6 +742,7 @@ Streams (independent):
 |---|---|---|
 | Data loss on the user's real, shared profile | Low / severe | 4.4 rules; development guard until Phase 2 exit; backups before every destructive step; two-process tests |
 | Desktop (25.09.4) and tanki (newer core) writing one collection | Unknown / medium | Phase 0 spike D; one-time notice to update desktop |
+| Desktop and tanki open on one profile at the same time, because Anki's backup drops the file lock (4.4 correction) | Likely once desktop has run 30 minutes / severe | tanki reopens after its own backups; Phase 2 adds a second "is desktop running" check before the guard is lifted; report upstream |
 | Two sync servers on one collection | Likely if desktop keeps using AnkiWeb / medium | Sync off by default; first-time warning (decision 2 consequences) |
 | Anki's Rust API changes under us | Certain / medium | Single adapter crate, pinned commit, upgrade gate |
 | Patch 0001 does not compile or stops applying | Low / low | `Backend` hand-over fallback (4.3) |
@@ -760,13 +764,14 @@ Each item names the phase that resolves it. Replace the entry with the result wh
 | Item | Source | Resolved in |
 |---|---|---|
 | Patch 0001 compiles; tanki-core test passes shared state to the builder and converts idle/media-check progress to typed protobuf variants. Setup applies once, skips on rerun, rejects drift. | 4.1 | Phase 0 foundation verified |
-| Sync works using only public functions; abort behaviour | R1, R5 | Phase 0 spike A |
+| **Sync works with public functions only (2026-11-13).** Against `SimpleServer` in-process on loopback: login (wrong password refused), first normal sync reports full sync required, full upload, full download (fixture only, backup first), normal sync in both directions between two clients, media sync (files byte-identical), typed progress for all three through patch 0001. Abort: `want_abort` gives `Interrupted` and a clean rollback on the same connection; dropping the future needs close-and-reopen, after which committed notes are intact and the next sync passes. `sync_login` returns an auth with no endpoint (which would mean AnkiWeb); Anki follows 308 redirects itself and reports `new_endpoint`, which Phase 2 must validate before saving. Server users come from `SYNC_USER*` variables read at start. Test: `actor::sync_spike::public_sync_round_trip`. | R1, R5 | Phase 0 spike A done |
 | Whether `partial_render` must be true to match desktop | R2 vs R3 | Phase 0 spike B |
-| Library behaviour when the collection schema is newer than supported | R5 | Phase 0 spike C |
+| **Schema edges (2026-11-13).** Schema 11 file: tanki copies it byte for byte to `backups/tanki-pre-upgrade-<time>.anki2`, then the library upgrades it in place to 18; a non-empty WAL beside an old file is refused. Schema 19 (version field edited on a closed temp fixture): tanki's peek refuses before the library is called; the library on its own also refuses with `DbErrorKind::FileTooNew`; the file is unchanged in both cases. Test: `tests/schema_edges.rs`. | R5 | Phase 0 spike C done |
 | What a 25.09.4 client drops from a collection written by the newer core | this plan | Phase 0 spike D |
 | Image display through herdr, kitty, Ghostty on this machine. **Partial (2026-11-13):** herdr (XTVERSION libghostty, TERM_PROGRAM=herdr) auto-detected Kitty direct placement, 15×34 px cells, Kitty keyboard flags 0, sixel unconfirmed; user confirmed the test image displayed. Plain Ghostty 1.3.0 (TERM=xterm-ghostty, outside herdr): same detection (Kitty direct placement, 15×34 px cells, 3735×1938 px text area, keyboard flags 0, sixel unconfirmed); user confirmed the Kitty-protocol image displayed. Standalone kitty terminal: user confirmed the test image displayed (output not pasted). **Spike E complete for all three terminals.** | R8 | Phase 0 spike E |
 | User installed protoc 31.1; full workspace build and tests pass with it. Distro 3.21 was not tested and is no longer required for this environment. | 4.1 | Phase 0 foundation verified |
-| Anki's server accepts a custom `BUILDHASH` in the client string | 4.3 | Phase 0 spike A |
+| **Build hash (2026-11-13).** Cannot be customised from tanki's build (see 4.3); it is empty, and the server accepted the resulting client string for every request. | 4.3 | Phase 0 spike A done |
+| **Cross-process lock is lost after any backup (found 2026-11-13).** See the correction in 4.4. tanki now reopens after each backup; detecting a running desktop that has already dropped its lock is open. Also seen: backup file names have one-second resolution, so two backups in the same second overwrite each other. | R5 | tanki side done in Phase 0; desktop side is a Phase 2 design decision |
 | Two different servers on one collection force a full sync | decision 2 | Phase 2 tests |
 | Kitty graphics in VS Code's terminal; placeholders in Konsole; bidi per terminal; text sizing outside kitty | R8 | Phase 4, best effort |
 | Exact browser output for indent/justify markup; prevalence of JS in shared decks | R3, R7 | Phase 3–4 corpus |
