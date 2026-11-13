@@ -1,0 +1,64 @@
+---
+source: crates/tanki-render/tests/render.rs
+expression: snapshot
+---
+question, night=false
+00|    Question [image: fixture.svg] ▶     |
+  4..12: Rgb(0, 0, 0) Reset BOLD
+  12..13: Rgb(0, 0, 0) Reset NONE
+  13..33: Rgb(0, 0, 0) Reset DIM
+  33..35: Rgb(0, 0, 0) Reset NONE
+01|                                        |
+answer_row: None
+widgets: [Widget { key: "play:q:0", kind: Replay { side: Question, index: 0 }, row: 0, col: 34, width: 1 }, Widget { key: "typeans", kind: TypeAnswer, row: 1, col: 0, width: 40 }]
+notices: []
+
+answer, night=false
+00|    Question [image: fixture.svg] ▶     |
+  4..12: Rgb(0, 0, 0) Reset BOLD
+  12..13: Rgb(0, 0, 0) Reset NONE
+  13..33: Rgb(0, 0, 0) Reset DIM
+  33..35: Rgb(0, 0, 0) Reset NONE
+01|                                        |
+02|────────────────────────────────────────|
+  0..40: Reset Reset DIM
+03|                                        |
+04|                  Ansx                  |
+  18..21: Rgb(0, 0, 0) Rgb(170, 255, 170) NONE
+  21..22: Rgb(0, 0, 0) Rgb(255, 170, 170) NONE
+05|                   ↓                    |
+  19..20: Rgb(0, 0, 0) Reset NONE
+06|                 Answer                 |
+  17..20: Rgb(0, 0, 0) Rgb(170, 255, 170) NONE
+  20..23: Rgb(0, 0, 0) Rgb(204, 204, 204) NONE
+answer_row: Some(2)
+widgets: [Widget { key: "play:a:0", kind: Replay { side: Answer, index: 0 }, row: 0, col: 34, width: 1 }]
+notices: []
+
+question, night=true
+00|    Question [image: fixture.svg] ▶     |
+  4..12: Reset Reset BOLD
+  13..33: Reset Reset DIM
+01|                                        |
+answer_row: None
+widgets: [Widget { key: "play:q:0", kind: Replay { side: Question, index: 0 }, row: 0, col: 34, width: 1 }, Widget { key: "typeans", kind: TypeAnswer, row: 1, col: 0, width: 40 }]
+notices: []
+
+answer, night=true
+00|    Question [image: fixture.svg] ▶     |
+  4..12: Reset Reset BOLD
+  13..33: Reset Reset DIM
+01|                                        |
+02|────────────────────────────────────────|
+  0..40: Reset Reset DIM
+03|                                        |
+04|                  Ansx                  |
+  18..21: Rgb(0, 0, 0) Rgb(170, 255, 170) NONE
+  21..22: Rgb(0, 0, 0) Rgb(255, 170, 170) NONE
+05|                   ↓                    |
+06|                 Answer                 |
+  17..20: Rgb(0, 0, 0) Rgb(170, 255, 170) NONE
+  20..23: Rgb(0, 0, 0) Rgb(204, 204, 204) NONE
+answer_row: Some(2)
+widgets: [Widget { key: "play:a:0", kind: Replay { side: Answer, index: 0 }, row: 0, col: 34, width: 1 }]
+notices: []

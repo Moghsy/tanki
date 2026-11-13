@@ -1,0 +1,38 @@
+---
+source: crates/tanki-render/tests/render.rs
+expression: snapshot
+---
+question, night=false
+00|           A [...] and second           |
+  11..13: Rgb(0, 0, 0) Reset NONE
+  13..18: Rgb(0, 0, 255) Reset BOLD
+  18..29: Rgb(0, 0, 0) Reset NONE
+answer_row: None
+widgets: []
+notices: []
+
+answer, night=false
+00|           A cloze and second           |
+  11..13: Rgb(0, 0, 0) Reset NONE
+  13..18: Rgb(0, 0, 255) Reset BOLD
+  18..29: Rgb(0, 0, 0) Reset NONE
+01|                Answer ▶                |
+  16..24: Rgb(0, 0, 0) Reset NONE
+answer_row: None
+widgets: [Widget { key: "play:a:0", kind: Replay { side: Answer, index: 0 }, row: 1, col: 23, width: 1 }]
+notices: []
+
+question, night=true
+00|           A [...] and second           |
+  13..18: Rgb(173, 216, 230) Reset BOLD
+answer_row: None
+widgets: []
+notices: []
+
+answer, night=true
+00|           A cloze and second           |
+  13..18: Rgb(173, 216, 230) Reset BOLD
+01|                Answer ▶                |
+answer_row: None
+widgets: [Widget { key: "play:a:0", kind: Replay { side: Answer, index: 0 }, row: 1, col: 23, width: 1 }]
+notices: []

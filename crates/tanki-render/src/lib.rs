@@ -11,6 +11,17 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
+mod css;
+mod image_cache;
+mod layout;
+mod media;
+mod paint;
+mod para;
+mod style;
+mod text;
+
+pub use media::{image_cells, resolve as resolve_media, MediaRef, SizeRequest};
+
 /// One side of a card, ready to lay out.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CardSide {
@@ -178,8 +189,7 @@ pub struct RenderedCard {
 /// Lays out one side. Pure and synchronous; image decoding is separate
 /// ([`ImageCache`]).
 pub fn render(side: &CardSide, options: &RenderOptions) -> RenderedCard {
-    let _ = (side, options);
-    unimplemented!("renderer stream")
+    layout::render(side, options)
 }
 
 /// Paints the text of `card` into `buf` inside `area`, starting at line
@@ -191,8 +201,7 @@ pub fn paint(
     area: ratatui::layout::Rect,
     buf: &mut ratatui::buffer::Buffer,
 ) {
-    let _ = (card, scroll, area, buf);
-    unimplemented!("renderer stream")
+    paint::paint(card, scroll, area, buf)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -206,18 +215,19 @@ pub enum ImageError {
 /// and target size. Supports jpeg, png, gif (first frame), webp and svg
 /// (resvg).
 pub struct ImageCache {
-    _private: (),
+    inner: image_cache::Inner,
 }
 
 impl ImageCache {
     pub fn new() -> Self {
-        unimplemented!("renderer stream")
+        ImageCache {
+            inner: image_cache::Inner::new(),
+        }
     }
     /// Starts decoding `source` scaled to fit `max_px` (width, height) unless
     /// it is cached or already queued. Never blocks.
     pub fn request(&self, source: &ImageSource, max_px: (u32, u32)) {
-        let _ = (source, max_px);
-        unimplemented!("renderer stream")
+        self.inner.request(source, max_px)
     }
     /// The decoded image, once ready.
     pub fn get(
@@ -225,12 +235,11 @@ impl ImageCache {
         source: &ImageSource,
         max_px: (u32, u32),
     ) -> Option<Result<std::sync::Arc<image::DynamicImage>, ImageError>> {
-        let _ = (source, max_px);
-        unimplemented!("renderer stream")
+        self.inner.get(source, max_px)
     }
     /// Receives a message whenever a requested image finishes, so the UI can redraw.
     pub fn subscribe(&self) -> std::sync::mpsc::Receiver<()> {
-        unimplemented!("renderer stream")
+        self.inner.subscribe()
     }
 }
 
