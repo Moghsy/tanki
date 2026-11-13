@@ -1,0 +1,308 @@
+{
+ "anki_version": "26.08.1",
+ "cards": {
+  "Basic (and reversed card)|0|stock": {
+   "answer": "<b>Question</b> <img src=\"fixture.svg\"> [anki:play:q:0]\n\n<hr id=answer>\n\nAnswer [anki:play:a:0]",
+   "answer_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    }
+   ],
+   "css": ".card {\n    font-family: arial;\n    font-size: 20px;\n    line-height: 1.5;\n    text-align: center;\n    color: black;\n    background-color: white;\n}\n",
+   "question": "<b>Question</b> <img src=\"fixture.svg\"> [anki:play:q:0]",
+   "question_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    }
+   ]
+  },
+  "Basic (and reversed card)|1|stock": {
+   "answer": "Answer [anki:play:q:0]\n\n<hr id=answer>\n\n<b>Question</b> <img src=\"fixture.svg\"> [anki:play:a:0]",
+   "answer_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    }
+   ],
+   "css": ".card {\n    font-family: arial;\n    font-size: 20px;\n    line-height: 1.5;\n    text-align: center;\n    color: black;\n    background-color: white;\n}\n",
+   "question": "Answer [anki:play:q:0]",
+   "question_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    }
+   ]
+  },
+  "Basic (optional reversed card)|0|stock": {
+   "answer": "<b>Question</b> <img src=\"fixture.svg\"> [anki:play:q:0]\n\n<hr id=answer>\n\nAnswer [anki:play:a:0]",
+   "answer_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    }
+   ],
+   "css": ".card {\n    font-family: arial;\n    font-size: 20px;\n    line-height: 1.5;\n    text-align: center;\n    color: black;\n    background-color: white;\n}\n",
+   "question": "<b>Question</b> <img src=\"fixture.svg\"> [anki:play:q:0]",
+   "question_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    }
+   ]
+  },
+  "Basic (optional reversed card)|1|stock": {
+   "answer": "Answer [anki:play:q:0]\n\n<hr id=answer>\n\n<b>Question</b> <img src=\"fixture.svg\"> [anki:play:a:0]",
+   "answer_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    }
+   ],
+   "css": ".card {\n    font-family: arial;\n    font-size: 20px;\n    line-height: 1.5;\n    text-align: center;\n    color: black;\n    background-color: white;\n}\n",
+   "question": "Answer [anki:play:q:0]",
+   "question_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    }
+   ]
+  },
+  "Basic (type in the answer)|0|stock": {
+   "answer": "<b>Question</b> <img src=\"fixture.svg\"> [anki:play:a:0]\n\n<hr id=answer>\n\n[[type:Back]]",
+   "answer_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    }
+   ],
+   "css": ".card {\n    font-family: arial;\n    font-size: 20px;\n    line-height: 1.5;\n    text-align: center;\n    color: black;\n    background-color: white;\n}\n",
+   "question": "<b>Question</b> <img src=\"fixture.svg\"> [anki:play:q:0]\n\n[[type:Back]]",
+   "question_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    }
+   ]
+  },
+  "Basic|0|latex-missing": {
+   "answer": "Missing image: <img class=latex alt=\"&#x5C;int&#x5F;0&#x5E;1&#x20;x&#x5C;&#x2C;dx\" src=\"latex-7d4352d823ea2cbb07e8d9ddef74db1d98afdf60.png\">\n\n<hr id=answer>\n\n<img class=latex alt=\"&#x24;a&#x2B;b&#x24;\" src=\"latex-add2609af1bb7632cc22b68fd49fdd94de06b327.png\"> and <img class=latex alt=\"&#x5C;begin&#x7B;displaymath&#x7D;c&#x5C;end&#x7B;displaymath&#x7D;\" src=\"latex-3f4ae6253b7f4073aa9ab8b39c9ef156c50ef280.png\">LaTeX image generation is disabled in the preferences.",
+   "answer_av_tags": [],
+   "css": ".card {\n    font-family: arial;\n    font-size: 20px;\n    line-height: 1.5;\n    text-align: center;\n    color: black;\n    background-color: white;\n}\n",
+   "question": "Missing image: <img class=latex alt=\"&#x5C;int&#x5F;0&#x5E;1&#x20;x&#x5C;&#x2C;dx\" src=\"latex-7d4352d823ea2cbb07e8d9ddef74db1d98afdf60.png\">LaTeX image generation is disabled in the preferences.",
+   "question_av_tags": []
+  },
+  "Basic|0|stock": {
+   "answer": "<b>Question</b> <img src=\"fixture.svg\"> [anki:play:q:0]\n\n<hr id=answer>\n\nAnswer [anki:play:a:0]",
+   "answer_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    }
+   ],
+   "css": ".card {\n    font-family: arial;\n    font-size: 20px;\n    line-height: 1.5;\n    text-align: center;\n    color: black;\n    background-color: white;\n}\n",
+   "question": "<b>Question</b> <img src=\"fixture.svg\"> [anki:play:q:0]",
+   "question_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    }
+   ]
+  },
+  "Cloze|0|cloze-hint": {
+   "answer": "<span class=\"cloze\" data-ordinal=\"1\">Paris</span> is in <span class=\"cloze-inactive\" data-ordinal=\"2\">France</span>; \\(y = mx + b\\) and <span class=\"cloze\" data-ordinal=\"1\">\\(x^2\\)</span><br>\nExtra [anki:play:a:0]",
+   "answer_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    }
+   ],
+   "css": ".card {\n    font-family: arial;\n    font-size: 20px;\n    line-height: 1.5;\n    text-align: center;\n    color: black;\n    background-color: white;\n}\n.cloze {\n    font-weight: bold;\n    color: blue;\n}\n.nightMode .cloze {\n    color: lightblue;\n}\n",
+   "question": "<span class=\"cloze\" data-cloze=\"Paris\" data-ordinal=\"1\">[capital city]</span> is in <span class=\"cloze-inactive\" data-ordinal=\"2\">France</span>; \\(y = mx + b\\) and <span class=\"cloze\" data-cloze=\"&#x5C;&#x28;x&#x5E;2&#x5C;&#x29;\" data-ordinal=\"1\">[...]</span>",
+   "question_av_tags": []
+  },
+  "Cloze|0|stock": {
+   "answer": "A <span class=\"cloze\" data-ordinal=\"1\">cloze</span> and <span class=\"cloze-inactive\" data-ordinal=\"2\">second</span><br>\nAnswer [anki:play:a:0]",
+   "answer_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    }
+   ],
+   "css": ".card {\n    font-family: arial;\n    font-size: 20px;\n    line-height: 1.5;\n    text-align: center;\n    color: black;\n    background-color: white;\n}\n.cloze {\n    font-weight: bold;\n    color: blue;\n}\n.nightMode .cloze {\n    color: lightblue;\n}\n",
+   "question": "A <span class=\"cloze\" data-cloze=\"cloze\" data-ordinal=\"1\">[...]</span> and <span class=\"cloze-inactive\" data-ordinal=\"2\">second</span>",
+   "question_av_tags": []
+  },
+  "Cloze|1|cloze-hint": {
+   "answer": "<span class=\"cloze-inactive\" data-ordinal=\"1\">Paris</span> is in <span class=\"cloze\" data-ordinal=\"2\">France</span>; \\(y = mx + b\\) and <span class=\"cloze-inactive\" data-ordinal=\"1\">\\(x^2\\)</span><br>\nExtra [anki:play:a:0]",
+   "answer_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    }
+   ],
+   "css": ".card {\n    font-family: arial;\n    font-size: 20px;\n    line-height: 1.5;\n    text-align: center;\n    color: black;\n    background-color: white;\n}\n.cloze {\n    font-weight: bold;\n    color: blue;\n}\n.nightMode .cloze {\n    color: lightblue;\n}\n",
+   "question": "<span class=\"cloze-inactive\" data-ordinal=\"1\">Paris</span> is in <span class=\"cloze\" data-cloze=\"France\" data-ordinal=\"2\">[...]</span>; \\(y = [...] + b\\) and <span class=\"cloze-inactive\" data-ordinal=\"1\">\\(x^2\\)</span>",
+   "question_av_tags": []
+  },
+  "Cloze|1|stock": {
+   "answer": "A <span class=\"cloze-inactive\" data-ordinal=\"1\">cloze</span> and <span class=\"cloze\" data-ordinal=\"2\">second</span><br>\nAnswer [anki:play:a:0]",
+   "answer_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    }
+   ],
+   "css": ".card {\n    font-family: arial;\n    font-size: 20px;\n    line-height: 1.5;\n    text-align: center;\n    color: black;\n    background-color: white;\n}\n.cloze {\n    font-weight: bold;\n    color: blue;\n}\n.nightMode .cloze {\n    color: lightblue;\n}\n",
+   "question": "A <span class=\"cloze-inactive\" data-ordinal=\"1\">cloze</span> and <span class=\"cloze\" data-cloze=\"second\" data-ordinal=\"2\">[...]</span>",
+   "question_av_tags": []
+  },
+  "Image Occlusion|0|stock": {
+   "answer": "<div>Synthetic image occlusion</div>\n<div style=\"display: none\"><div class=\"cloze-highlight\" data-ordinal=\"1\" data-shape=\"rect\" data-left=\".1\" data-top=\".1\" data-width=\".4\" data-height=\".4\" data-occludeInactive=\"1\" ></div></div>\n<div id=\"err\"></div>\n<div id=\"image-occlusion-container\">\n    <img src=\"fixture.svg\">\n    <canvas id=\"image-occlusion-canvas\"></canvas>\n</div>\n<script>\ntry {\n    anki.imageOcclusion.setup();\n} catch (exc) {\n    document.getElementById(\"err\").innerHTML = `Error loading image occlusion. Is your Anki version up to date?<br><br>${exc}`;\n}\n</script>\n\n<div><button id=\"toggle\">Toggle Masks</button></div>\n<div>Answer [anki:play:a:0]</div>\n",
+   "answer_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    }
+   ],
+   "css": "#image-occlusion-canvas {\n    --inactive-shape-color: #ffeba2;\n    --active-shape-color: #ff8e8e;\n    --inactive-shape-border: 1px #212121;\n    --active-shape-border: 1px #212121;\n    --highlight-shape-color: #ff8e8e00;\n    --highlight-shape-border: 1px #ff8e8e;\n}\n\n.card {\n    font-family: arial;\n    font-size: 20px;\n    text-align: center;\n    color: black;\n    background-color: white;\n}\n",
+   "question": "<div>Synthetic image occlusion</div>\n<div style=\"display: none\"><div class=\"cloze\" data-ordinal=\"1\" data-shape=\"rect\" data-left=\".1\" data-top=\".1\" data-width=\".4\" data-height=\".4\" data-occludeInactive=\"1\" ></div></div>\n<div id=\"err\"></div>\n<div id=\"image-occlusion-container\">\n    <img src=\"fixture.svg\">\n    <canvas id=\"image-occlusion-canvas\"></canvas>\n</div>\n<script>\ntry {\n    anki.imageOcclusion.setup();\n} catch (exc) {\n    document.getElementById(\"err\").innerHTML = `Error loading image occlusion. Is your Anki version up to date?<br><br>${exc}`;\n}\n</script>\n",
+   "question_av_tags": []
+  },
+  "tanki Broken|0|broken": {
+   "answer": "Back template has a problem:<br>Found &#x27;⁨{{Missing}}⁩&#x27;, but there is no field called &#x27;⁨Missing⁩&#x27;<br><a href='https://docs.ankiweb.net/templates/errors.html#template-syntax-error'>More information</a>",
+   "answer_av_tags": [],
+   "css": "",
+   "question": "Back template has a problem:<br>Found &#x27;⁨{{Missing}}⁩&#x27;, but there is no field called &#x27;⁨Missing⁩&#x27;<br><a href='https://docs.ankiweb.net/templates/errors.html#template-syntax-error'>More information</a>",
+   "question_av_tags": []
+  },
+  "tanki Golden|0|full": {
+   "answer": "<b>Bonjour</b> [anki:play:q:0]\n\n<hr id=answer>\n\nHello &amp; welcome [anki:play:a:0] [anki:play:a:1]",
+   "answer_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    },
+    {
+     "sound_or_video": "nested.mp3"
+    }
+   ],
+   "css": ".card {\n    font-family: serif;\n    font-size: 18px;\n    text-align: left;\n}\n.card3 rt {\n    color: gray;\n}\n",
+   "question": "<b>Bonjour</b> [anki:play:q:0]",
+   "question_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    }
+   ]
+  },
+  "tanki Golden|0|sparse": {
+   "answer": "Sparse front\n\n<hr id=answer>\n\nSparse back",
+   "answer_av_tags": [],
+   "css": ".card {\n    font-family: serif;\n    font-size: 18px;\n    text-align: left;\n}\n.card3 rt {\n    color: gray;\n}\n",
+   "question": "Sparse front",
+   "question_av_tags": []
+  },
+  "tanki Golden|1|full": {
+   "answer": "[anki:play:q:0]\n<div>[anki:play:q:1]</div>\n<div>Hello &amp; welcome [anki:play:q:2] [anki:play:q:3]</div>\n<div><i>extra</i> detail</div>\n\n<hr id=answer>\n\n\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint996e58cc564b764d').style.display='block';\nreturn false;\" draggable=false>\nExtra</a>\n<div id=\"hint996e58cc564b764d\" class=hint style=\"display: none\"><i>extra</i> detail</div>\n\n<div>Hello & welcome [anki:play:a:0] [anki:play:a:1]</div>",
+   "answer_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    },
+    {
+     "sound_or_video": "nested.mp3"
+    }
+   ],
+   "css": ".card {\n    font-family: serif;\n    font-size: 18px;\n    text-align: left;\n}\n.card3 rt {\n    color: gray;\n}\n",
+   "question": "[anki:play:q:0]\n<div>[anki:play:q:1]</div>\n<div>Hello &amp; welcome [anki:play:q:2] [anki:play:q:3]</div>\n<div><i>extra</i> detail</div>",
+   "question_av_tags": [
+    {
+     "tts": {
+      "field_text": "Bonjour [sound:fixture.wav]",
+      "lang": "en_US",
+      "other_args": [],
+      "speed": 1.0,
+      "voices": []
+     }
+    },
+    {
+     "tts": {
+      "field_text": "日本語[にほんご]を 勉強[べんきょう]する",
+      "lang": "ja_JP",
+      "other_args": [],
+      "speed": 0.800000011920929,
+      "voices": [
+       "Apple_Kyoko",
+       "Microsoft_Haruka"
+      ]
+     }
+    },
+    {
+     "sound_or_video": "fixture.wav"
+    },
+    {
+     "sound_or_video": "nested.mp3"
+    }
+   ]
+  },
+  "tanki Golden|1|sparse": {
+   "answer": "[anki:play:q:0]\n<div>[anki:play:q:1]</div>\n<div>Sparse back</div>\n<div></div>\n\n<hr id=answer>\n\n\n<div>Sparse back</div>",
+   "answer_av_tags": [],
+   "css": ".card {\n    font-family: serif;\n    font-size: 18px;\n    text-align: left;\n}\n.card3 rt {\n    color: gray;\n}\n",
+   "question": "[anki:play:q:0]\n<div>[anki:play:q:1]</div>\n<div>Sparse back</div>\n<div></div>",
+   "question_av_tags": [
+    {
+     "tts": {
+      "field_text": "Sparse front",
+      "lang": "en_US",
+      "other_args": [],
+      "speed": 1.0,
+      "voices": []
+     }
+    },
+    {
+     "tts": {
+      "field_text": "",
+      "lang": "ja_JP",
+      "other_args": [],
+      "speed": 0.800000011920929,
+      "voices": [
+       "Apple_Kyoko",
+       "Microsoft_Haruka"
+      ]
+     }
+    }
+   ]
+  },
+  "tanki Golden|2|full": {
+   "answer": "<ruby><rb>日本語</rb><rt>にほんご</rt></ruby>を<ruby><rb>勉強</rb><rt>べんきょう</rt></ruby>する\n\n<hr id=answer>\n\n日本語を勉強する<br>にほんごをべんきょうする",
+   "answer_av_tags": [],
+   "css": ".card {\n    font-family: serif;\n    font-size: 18px;\n    text-align: left;\n}\n.card3 rt {\n    color: gray;\n}\n",
+   "question": "<ruby><rb>日本語</rb><rt>にほんご</rt></ruby>を<ruby><rb>勉強</rb><rt>べんきょう</rt></ruby>する",
+   "question_av_tags": []
+  },
+  "tanki Golden|3|full": {
+   "answer": "<b>Bonjour</b> [anki:play:a:0]\n\n<hr id=answer>\n\n[[type:Back]]",
+   "answer_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    }
+   ],
+   "css": ".card {\n    font-family: serif;\n    font-size: 18px;\n    text-align: left;\n}\n.card3 rt {\n    color: gray;\n}\n",
+   "question": "<b>Bonjour</b> [anki:play:q:0]\n\n[[type:Back]]",
+   "question_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    }
+   ]
+  },
+  "tanki Golden|3|sparse": {
+   "answer": "Sparse front\n\n<hr id=answer>\n\n[[type:Back]]",
+   "answer_av_tags": [],
+   "css": ".card {\n    font-family: serif;\n    font-size: 18px;\n    text-align: left;\n}\n.card3 rt {\n    color: gray;\n}\n",
+   "question": "Sparse front\n\n[[type:Back]]",
+   "question_av_tags": []
+  },
+  "tanki Golden|4|full": {
+   "answer": "<div class=extra><i>extra</i> detail</div>\nBonjour [anki:play:q:0]\n\n<hr id=answer>\n\nInline \\(x^2 + y^2\\), display \\[\\frac{a}{b}\\], <img class=latex alt=\"E&#x3D;mc&#x5E;2\" src=\"latex-295d520fc805d1e5b40658b6a9127df8bb898d35.png\">\n<div class=meta>tanki Golden | Conditional | Default | Default | golden::full | flag0</div>",
+   "answer_av_tags": [],
+   "css": ".card {\n    font-family: serif;\n    font-size: 18px;\n    text-align: left;\n}\n.card3 rt {\n    color: gray;\n}\n",
+   "question": "<div class=extra><i>extra</i> detail</div>\nBonjour [anki:play:q:0]",
+   "question_av_tags": [
+    {
+     "sound_or_video": "fixture.wav"
+    }
+   ]
+  },
+  "tanki Golden|4|sparse": {
+   "answer": "<div class=noextra>no extra</div>\nSparse front\n\n<hr id=answer>\n\n<i>no math</i>\n<div class=meta>tanki Golden | Conditional | Default | Default | golden::sparse | flag0</div>",
+   "answer_av_tags": [],
+   "css": ".card {\n    font-family: serif;\n    font-size: 18px;\n    text-align: left;\n}\n.card3 rt {\n    color: gray;\n}\n",
+   "question": "<div class=noextra>no extra</div>\nSparse front",
+   "question_av_tags": []
+  }
+ },
+ "generated_by": "scripts/golden-render.py"
+}

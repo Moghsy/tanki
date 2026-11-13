@@ -347,6 +347,13 @@ fn execute(
         }
     })
 }
+/// Completes a partial render the way pylib's `apply_custom_filters` does
+/// (`pylib/anki/template.py`). Rust stops at the first filter it does not know
+/// and returns the text so far plus the remaining filters; pylib passes that
+/// text through add-on filter hooks, which tanki does not have, so the text is
+/// used as-is (built-in filters after an unknown one are not applied, as on
+/// desktop). `{{FrontSide}}` on the answer becomes `front`, the question after
+/// AV-tag extraction; elsewhere it keeps the text Rust gave it.
 fn nodes(nodes: Vec<pb::card_rendering::RenderedTemplateNode>, front: Option<&str>) -> String {
     use pb::card_rendering::rendered_template_node::Value;
     nodes
@@ -354,19 +361,24 @@ fn nodes(nodes: Vec<pb::card_rendering::RenderedTemplateNode>, front: Option<&st
         .map(|n| match n.value {
             Some(Value::Text(s)) => s,
             Some(Value::Replacement(r)) if r.field_name == "FrontSide" => {
-                front.unwrap_or_default().to_owned()
+                front.map_or(r.current_text, str::to_owned)
             }
             Some(Value::Replacement(r)) => r.current_text,
             None => String::new(),
         })
         .collect()
 }
+/// Converts AV tags as pylib's `av_tag_to_native` does: sound and video
+/// filenames are reduced to their last path component (`os.path.basename`
+/// on POSIX), so a `[sound:../x.mp3]` cannot point outside the media folder.
 fn audio(tags: Vec<pb::card_rendering::AvTag>) -> Vec<AudioTag> {
     use pb::card_rendering::av_tag::Value;
     tags.into_iter()
         .filter_map(|t| {
             t.value.map(|v| match v {
-                Value::SoundOrVideo(s) => AudioTag::SoundOrVideo(s),
+                Value::SoundOrVideo(s) => {
+                    AudioTag::SoundOrVideo(s.rsplit('/').next().unwrap_or_default().to_owned())
+                }
                 Value::Tts(t) => AudioTag::Tts {
                     text: t.field_text,
                     lang: t.lang,
@@ -378,15 +390,47 @@ fn audio(tags: Vec<pb::card_rendering::AvTag>) -> Vec<AudioTag> {
         })
         .collect()
 }
+/// Renders a card as pylib's `Card.render_output()` does
+/// (`TemplateRenderContext.render` in `pylib/anki/template.py`), checked
+/// against Anki's Python output by `tests/golden_render.rs`:
+///
+/// 1. `render_existing_card` with `partial_render = true` (with `false`, the
+///    answer's `{{FrontSide}}` would hold the question before AV extraction
+///    and replay its audio, and unknown filters would be skipped rather than
+///    ending filtering). A template error becomes the text of both sides,
+///    with no CSS and no audio.
+/// 2. Question: complete the nodes, then extract AV tags.
+/// 3. Answer: complete the nodes with `{{FrontSide}}` = the extracted
+///    question, then extract AV tags.
+/// 4. LaTeX, as pylib's `card_did_render` hook does after extraction:
+///    `[latex]`, `[$]` and `[$$]` become `<img class=latex>` tags. If an image
+///    is missing from the media folder and LaTeX generation is off (the
+///    default), the localized "disabled" message is appended once per side.
+///    tanki does not run LaTeX yet, so with generation on, a missing image is
+///    left missing (pylib would generate it).
 fn render(col: &mut Collection, card_id: i64) -> Result<RenderedCard> {
-    let r = CardRenderingService::render_existing_card(
+    use anki::services::{ConfigService, MediaService};
+    let r = match CardRenderingService::render_existing_card(
         col,
         pb::card_rendering::RenderExistingCardRequest {
             card_id,
             browser: false,
             partial_render: true,
         },
-    )?;
+    ) {
+        Ok(r) => r,
+        Err(e @ anki::error::AnkiError::TemplateError { .. }) => {
+            let text = e.message(col.tr());
+            return Ok(RenderedCard {
+                question: text.clone(),
+                answer: text,
+                css: String::new(),
+                question_audio: vec![],
+                answer_audio: vec![],
+            });
+        }
+        Err(e) => return Err(e.into()),
+    };
     let q = CardRenderingService::extract_av_tags(
         col,
         pb::card_rendering::ExtractAvTagsRequest {
@@ -401,9 +445,38 @@ fn render(col: &mut Collection, card_id: i64) -> Result<RenderedCard> {
             question_side: false,
         },
     )?;
+    let generate_latex = ConfigService::get_config_bool(
+        col,
+        pb::config::GetConfigBoolRequest {
+            key: pb::config::config_key::Bool::RenderLatex as i32,
+        },
+    )?
+    .val;
+    let latex_svg = r.latex_svg;
+    let mut latex = |html: String| -> Result<String> {
+        let out = CardRenderingService::extract_latex(
+            col,
+            pb::card_rendering::ExtractLatexRequest {
+                text: html,
+                svg: latex_svg,
+                expand_clozes: false,
+            },
+        )?;
+        let mut html = out.text;
+        for image in out.latex {
+            let path = MediaService::get_absolute_media_path(col, image.filename.into())?.val;
+            if !Path::new(&path).exists() && !generate_latex {
+                html.push_str(&col.tr().preferences_latex_generation_disabled());
+                break;
+            }
+        }
+        Ok(html)
+    };
+    let question = latex(q.text)?;
+    let answer = latex(a.text)?;
     Ok(RenderedCard {
-        question: q.text,
-        answer: a.text,
+        question,
+        answer,
         css: r.css,
         question_audio: audio(q.av_tags),
         answer_audio: audio(a.av_tags),
