@@ -12,3 +12,4 @@ tanki-term = { path = "../tanki-term" }
 tanki-media = { path = "../tanki-media" }
 ratatui.workspace = true
 crossterm.workspace = true
+unicode-width = "0.2"

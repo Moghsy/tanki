@@ -4777,6 +4777,7 @@ dependencies = [
  "tanki-media",
  "tanki-render",
  "tanki-term",
+ "unicode-width",
 ]
 
 [[package]]
