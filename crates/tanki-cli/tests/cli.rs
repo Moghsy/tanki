@@ -130,3 +130,122 @@ fn second_process_on_open_profile_exits_with_locked_code() {
     actor.close().unwrap();
     assert!(fixture_dump(base.path()).output().unwrap().status.success());
 }
+
+fn generated_fixture() -> tempfile::TempDir {
+    let base = tempfile::tempdir().unwrap();
+    let profile = base.path().join("tanki-fixture");
+    std::fs::create_dir(&profile).unwrap();
+    let actor = tanki_core::CollectionActor::open(&profile).unwrap();
+    actor.execute(tanki_core::Command::GenerateFixture).unwrap();
+    actor.close().unwrap();
+    base
+}
+
+fn fixture_command(base: &std::path::Path) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_tanki"));
+    command
+        .arg("--base")
+        .arg(base)
+        .env_remove("TANKI_ALLOW_REAL_PROFILE")
+        .env_remove("ANKI_BASE")
+        .env_remove("XDG_DATA_HOME");
+    command
+}
+
+fn assert_closed(base: &std::path::Path) {
+    let profile = base.join("tanki-fixture");
+    let actor = tanki_core::CollectionActor::open(&profile)
+        .expect("CLI must release its actor and backup worker");
+    actor.close().unwrap();
+    assert!(std::fs::read_dir(profile.join("backups"))
+        .unwrap()
+        .next()
+        .is_some());
+}
+
+#[test]
+fn decks_fixture_json_and_table_have_counts_and_close_actor() {
+    let base = generated_fixture();
+    let json = fixture_command(base.path())
+        .args(["decks", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        json.status.success(),
+        "{}",
+        String::from_utf8_lossy(&json.stderr)
+    );
+    let tree: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    let children = tree["children"].as_array().unwrap();
+    assert!(children.iter().any(|deck| deck["name"] == "Default"));
+    assert!(children.iter().all(|deck| deck["new"].is_number()
+        && deck["learning"].is_number()
+        && deck["review"].is_number()));
+    assert_closed(base.path());
+    let table = fixture_command(base.path()).arg("decks").output().unwrap();
+    assert!(
+        table.status.success(),
+        "{}",
+        String::from_utf8_lossy(&table.stderr)
+    );
+    let text = String::from_utf8(table.stdout).unwrap();
+    assert!(text.lines().next().unwrap().contains("New   Learn     Due"));
+    assert!(text.contains("Default"));
+    assert_closed(base.path());
+}
+
+#[test]
+fn review_non_tty_and_missing_deck_errors_still_close_and_backup() {
+    let base = generated_fixture();
+    let output = fixture_command(base.path()).arg("review").output().unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("requires a terminal"));
+    assert_closed(base.path());
+    let output = fixture_command(base.path())
+        .args(["review", "missing::deck"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("No deck named"));
+    assert_closed(base.path());
+    let output = fixture_command(base.path()).output().unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("requires a terminal"));
+    assert_closed(base.path());
+}
+
+#[test]
+fn study_commands_require_safe_base_and_profile_names() {
+    for command in ["review", "decks"] {
+        let missing = Command::new(env!("CARGO_BIN_EXE_tanki"))
+            .arg(command)
+            .output()
+            .unwrap();
+        assert!(!missing.status.success());
+        assert!(String::from_utf8_lossy(&missing.stderr).contains("explicit --base"));
+        let base = tempfile::tempdir().unwrap();
+        let invalid = fixture_command(base.path())
+            .args(["--profile", "../escape", command])
+            .output()
+            .unwrap();
+        assert!(!invalid.status.success());
+        assert!(String::from_utf8_lossy(&invalid.stderr).contains("single folder name"));
+        assert!(std::fs::read_dir(base.path()).unwrap().next().is_none());
+    }
+}
+
+#[test]
+fn invalid_keymap_fails_before_collection_open() {
+    let base = tempfile::tempdir().unwrap();
+    let keymap = base.path().join("keys.json");
+    std::fs::write(&keymap, r#"[{"scope":"review","key":"x","action":"fly"}]"#).unwrap();
+    let output = fixture_command(base.path())
+        .arg("--keymap")
+        .arg(keymap)
+        .arg("review")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unknown keymap action"));
+    assert!(!base.path().join("tanki-fixture").exists());
+}

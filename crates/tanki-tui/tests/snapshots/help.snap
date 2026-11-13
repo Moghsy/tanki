@@ -1,0 +1,119 @@
+ Question
+ ─┌ Keys: Review ────────────────────────────────────────────────────────────┐
+ A│Review                                                                    │
+  │  Space, Enter           Show answer / answer Good                        │
+  │  1                      Answer Again                                     │
+  │  2                      Answer Hard                                      │
+  │  3                      Answer Good                                      │
+  │  4                      Answer Easy                                      │
+  │  u                      Undo                                             │
+  │  m                      More actions                                     │
+  │  r, F5                  Replay audio                                     │
+  │  5                      Pause / resume audio                             │
+  │  6                      Audio -5s                                        │
+  │  7                      Audio +5s                                        │
+  │  p                      Play the next audio button                       │
+  │  Ctrl+1, Alt+1          Toggle flag 1                                    │
+  │  Ctrl+2, Alt+2          Toggle flag 2                                    │
+  │  Ctrl+3, Alt+3          Toggle flag 3                                    │
+  │  Ctrl+4, Alt+4          Toggle flag 4                                    │
+  │  Ctrl+5, Alt+5          Toggle flag 5                                    │
+──│  Ctrl+6, Alt+6          Toggle flag 6                                    │──
+  └──────────────────────────────────────────────────────────────────────────┘
+                  1 Again      2 Hard      3 Good      4 Easy            More m
+ fixture │ 1 0 0                                         ♪ on │ ▣ text │ ? help
+
+Buffer {
+    area: Rect { x: 0, y: 0, width: 80, height: 24 },
+    content: [
+        " Question                                                                       ",
+        " ─┌ Keys: Review ────────────────────────────────────────────────────────────┐  ",
+        " A│Review                                                                    │  ",
+        "  │  Space, Enter           Show answer / answer Good                        │  ",
+        "  │  1                      Answer Again                                     │  ",
+        "  │  2                      Answer Hard                                      │  ",
+        "  │  3                      Answer Good                                      │  ",
+        "  │  4                      Answer Easy                                      │  ",
+        "  │  u                      Undo                                             │  ",
+        "  │  m                      More actions                                     │  ",
+        "  │  r, F5                  Replay audio                                     │  ",
+        "  │  5                      Pause / resume audio                             │  ",
+        "  │  6                      Audio -5s                                        │  ",
+        "  │  7                      Audio +5s                                        │  ",
+        "  │  p                      Play the next audio button                       │  ",
+        "  │  Ctrl+1, Alt+1          Toggle flag 1                                    │  ",
+        "  │  Ctrl+2, Alt+2          Toggle flag 2                                    │  ",
+        "  │  Ctrl+3, Alt+3          Toggle flag 3                                    │  ",
+        "  │  Ctrl+4, Alt+4          Toggle flag 4                                    │  ",
+        "  │  Ctrl+5, Alt+5          Toggle flag 5                                    │  ",
+        "──│  Ctrl+6, Alt+6          Toggle flag 6                                    │──",
+        "  └──────────────────────────────────────────────────────────────────────────┘  ",
+        "                  1 Again      2 Hard      3 Good      4 Easy            More m ",
+        " fixture │ 1 0 0                                         ♪ on │ ▣ text │ ? help ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 1, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: ITALIC,
+        x: 2, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 9, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 3, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 28, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 4, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 28, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 5, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 28, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 6, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 28, y: 6, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 7, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 28, y: 7, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 8, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 28, y: 8, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 9, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 28, y: 9, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 10, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 28, y: 10, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 11, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 28, y: 11, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 12, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 28, y: 12, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 13, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 28, y: 13, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 14, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 28, y: 14, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 15, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 28, y: 15, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 16, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 28, y: 16, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 17, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 28, y: 17, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 18, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 28, y: 18, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 19, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 28, y: 19, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 20, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 2, y: 20, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 20, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 28, y: 20, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 78, y: 20, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 21, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 17, y: 22, fg: Red, bg: Reset, underline: Reset, modifier: REVERSED,
+        x: 26, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 30, y: 22, fg: Rgb(255, 165, 0), bg: Reset, underline: Reset, modifier: REVERSED,
+        x: 38, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 42, y: 22, fg: Green, bg: Reset, underline: Reset, modifier: BOLD | REVERSED,
+        x: 50, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 54, y: 22, fg: Blue, bg: Reset, underline: Reset, modifier: REVERSED,
+        x: 62, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 73, y: 22, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 79, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: BOLD,
+        x: 9, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 11, y: 23, fg: LightBlue, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 12, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 13, y: 23, fg: DarkGray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 14, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 15, y: 23, fg: DarkGray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 16, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+    ]
+}
