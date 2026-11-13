@@ -15,7 +15,9 @@ impl SyncEndpoint {
         let url = Url::parse(value)
             .map_err(|_| CoreError::Invalid("Configure an explicit sync server URL.".into()))?;
         if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
-            return Err(CoreError::Invalid("Sync requires an HTTP(S) server URL.".into()));
+            return Err(CoreError::Invalid(
+                "Sync requires an HTTP(S) server URL.".into(),
+            ));
         }
         if forbidden_host(url.host_str().unwrap()) {
             return Err(CoreError::Invalid(
@@ -23,12 +25,19 @@ impl SyncEndpoint {
                     .into(),
             ));
         }
-        if !url.username().is_empty() || url.password().is_some() || url.query().is_some()
+        if !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
             || url.fragment().is_some()
         {
-            return Err(CoreError::Invalid("Sync URL cannot contain credentials, query or fragment.".into()));
+            return Err(CoreError::Invalid(
+                "Sync URL cannot contain credentials, query or fragment.".into(),
+            ));
         }
-        Ok(Self(url.join("./").map_err(|e| CoreError::Invalid(e.to_string()))?))
+        Ok(Self(
+            url.join("./")
+                .map_err(|e| CoreError::Invalid(e.to_string()))?,
+        ))
     }
 
     pub fn as_str(&self) -> &str {
@@ -45,7 +54,7 @@ impl SyncEndpoint {
     }
 }
 
-// Anki follows protocol-level 308 redirects itself, using the response body.
+// Anki follows protocol-level 308 redirects itself, using the Location header.
 // Blocking automatic redirects alone cannot prevent a redirected AnkiWeb request.
 // Deny its DNS resolution too, and disable proxies so they cannot resolve it instead.
 #[cfg(test)]
@@ -63,12 +72,20 @@ pub(super) fn client() -> Result<reqwest::Client> {
 struct SelfHostedResolver;
 
 #[cfg(test)]
+pub(super) static BLOCKED_RESOLUTIONS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(test)]
 impl reqwest::dns::Resolve for SelfHostedResolver {
     fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
         Box::pin(async move {
             if forbidden_host(name.as_str()) {
-                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied,
-                    "AnkiWeb sync endpoints are forbidden").into());
+                BLOCKED_RESOLUTIONS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "AnkiWeb sync endpoints are forbidden",
+                )
+                .into());
             }
             let addresses = tokio::net::lookup_host((name.as_str(), 0)).await?;
             Ok(Box::new(addresses.collect::<Vec<_>>().into_iter()) as reqwest::dns::Addrs)
@@ -82,12 +99,23 @@ mod tests {
 
     #[test]
     fn explicit_self_hosted_endpoint_required() {
-        for bad in ["", "sync.example.com", "file:///tmp/x", "https://ankiweb.net/",
-            "https://sync.ankiweb.net/", "https://a.b.ANKIWEB.NET./", "http://u:p@example.com/"] {
+        for bad in [
+            "",
+            "sync.example.com",
+            "file:///tmp/x",
+            "https://ankiweb.net/",
+            "https://sync.ankiweb.net/",
+            "https://a.b.ANKIWEB.NET./",
+            "http://u:p@example.com/",
+        ] {
             assert!(SyncEndpoint::parse(bad).is_err(), "accepted {bad}");
         }
-        assert_eq!(SyncEndpoint::parse("http://127.0.0.1:1234/").unwrap().as_str(),
-            "http://127.0.0.1:1234/");
+        assert_eq!(
+            SyncEndpoint::parse("http://127.0.0.1:1234/")
+                .unwrap()
+                .as_str(),
+            "http://127.0.0.1:1234/"
+        );
         assert!(SyncEndpoint::parse("https://ankiweb.net.example.com/").is_ok());
     }
 }

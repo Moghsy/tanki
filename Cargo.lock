@@ -3081,11 +3081,14 @@ dependencies = [
  "anki",
  "anki_i18n",
  "anki_proto",
+ "axum",
  "prost",
+ "reqwest",
  "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]
