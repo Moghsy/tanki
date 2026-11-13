@@ -46,7 +46,7 @@ No wheel is downloaded. Both Anki versions are already on this machine:
 
 - 25.09.4 (the desktop version): the interpreter of the installed launcher,
   `~/.local/share/AnkiProgramFiles/.venv/bin/python`, has `anki` 25.9.4.
-- Pinned core (26.08.1 at `4aa9c0836`): built from `vendor/anki` by
+- Pinned core (the 26.09.4 release tag): built from `vendor/anki` by
   `scripts/build-pinned-python.py` into `.tools/pinned-python` of the main
   checkout; run the same interpreter with `PYTHONPATH` set to that folder.
 

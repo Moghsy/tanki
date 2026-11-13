@@ -1,6 +1,6 @@
 # tanki
 
-A terminal Anki client in Rust. Phase 0 is in progress; this is not yet a usable client.
+A terminal Anki client in Rust. Phase 0 (foundations and risk spikes) is done; this is not yet a usable client.
 
 Licensed under AGPL-3.0-or-later.
 
@@ -26,3 +26,18 @@ Generate a synthetic profile (all six stock note types, media, three reviews):
 fixture_base=$(mktemp -d)
 cargo run -p xtask --features fixtures -- fixtures --base "$fixture_base"
 ```
+
+Two checks compare against Anki's own Python package and need it on the machine (see `docs/implementation/phase-0-interfaces.md`); plain `cargo test` does not:
+
+```sh
+# Regenerate the golden card renders after moving the Anki pin
+python3 scripts/build-pinned-python.py --python /path/to/python-with-anki-deps
+PYTHONPATH="$PWD/.tools/pinned-python" PYTHONDONTWRITEBYTECODE=1 /path/to/python-with-anki-deps \
+    scripts/golden-render.py tests/fixtures/golden/render.json
+
+# Version-skew test against an installed Anki 25.09.4
+TANKI_SKEW_PYTHON=/path/to/python-with-anki-25.09.4 PYTHONDONTWRITEBYTECODE=1 \
+    cargo test -p tanki-core --test version_skew -- --nocapture
+```
+
+Do not run `cargo fmt --all`: it follows path dependencies into `vendor/anki`. Format per package (`cargo fmt -p tanki-core`).

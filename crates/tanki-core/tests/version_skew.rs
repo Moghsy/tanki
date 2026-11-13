@@ -1,6 +1,6 @@
 //! Spike D: desktop version skew.
 //!
-//! Builds a collection with the pinned (26.08.1) core, lets Anki 25.09.4's
+//! Builds a collection with the pinned core (26.08.1 when written, 26.09.4 since the pin bump), lets Anki 25.09.4's
 //! Python package open and change copies of it, then reopens each copy with
 //! the pinned core and diffs the whole persisted state. The result is written
 //! up in `docs/implementation/spike-d-version-skew.md`.
@@ -35,7 +35,10 @@ use std::{
 use tanki_core::{CollectionActor, Command, Rating, Response};
 
 const DESKTOP_VERSION: &str = "25.09.4";
-const PINNED_VERSION: &str = "26.08.1";
+/// The pinned core's version, read from the checkout so a pin bump needs no edit here.
+fn pinned_version() -> &'static str {
+    include_str!("../../../vendor/anki/.version").trim()
+}
 const SKEW_DECK: &str = "Skew deck";
 const SKEW_DECK_RENAMED: &str = "Skew deck renamed in desktop";
 const FILTERED_DECK: &str = "Skew filtered";
@@ -104,10 +107,10 @@ fn run(exe: OsString, pinned: Option<OsString>) {
     let control = pinned.map(|path| Python {
         exe,
         pythonpath: Some(path),
-        version: PINNED_VERSION,
+        version: pinned_version(),
     });
     if let Some(control) = &control {
-        assert_eq!(control.version_check(), PINNED_VERSION);
+        assert_eq!(control.version_check(), pinned_version());
     }
 
     let fixture = tempfile::tempdir().unwrap();
@@ -285,7 +288,7 @@ fn compare_with_control(scenario: &Scenario, desktop: &Outcome, control: &Outcom
         .collect();
     println!(
         "control [{}] vs [{}] for {}: {} non-bookkeeping differences",
-        PINNED_VERSION,
+        pinned_version(),
         DESKTOP_VERSION,
         scenario.name,
         skew.len()

@@ -3,6 +3,13 @@
 Status: done, 2026-11-13. The pair under test is Anki desktop **25.09.4**, the
 user's installed launcher, and tanki's pinned core **26.08.1 at `4aa9c0836`**.
 
+Pin bump note (lead, 2026-11-13): the pin has since moved to the **26.09.4**
+release tag. Between `4aa9c0836` and 26.09.4 nothing under `proto/` (apart from a
+Qt-only RPC), `rslib/src/storage`, `rslib/src/deckconfig` or `rslib/src/config`
+changed, so the inventory below stands, and the test passes unchanged against
+26.09.4 with every finding asserted. Where the text says "pinned core 26.08.1",
+read "26.08.1 and 26.09.4".
+
 Confidence labels follow the plan: **[spike]** means run in
 `crates/tanki-core/tests/version_skew.rs`, **[code]** means read from the
 source, not run.

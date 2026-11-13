@@ -1,7 +1,7 @@
 use std::{error::Error, fs, path::Path, process::Command};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const PIN: &str = "4aa9c0836965b519285372b456078c6fd1614569";
+const PIN: &str = "c06370ff4d87cb48d825f90cc83e02b9a4e84ecd";
 
 fn git(dir: &Path, args: &[&str]) -> Result<()> {
     let status = Command::new("git").current_dir(dir).args(args).status()?;
