@@ -304,12 +304,17 @@ impl Worker {
 pub(crate) fn resolve(media_dir: &Path, name: &str) -> Result<PathBuf, String> {
     let bad = name.is_empty()
         || name.contains(['/', '\\', '\0'])
-        || name.contains("..")
+        || matches!(name, "." | "..")
         || Path::new(name).is_absolute();
     if bad {
         return Err(format!("unsafe audio file name: {name}"));
     }
     let path = media_dir.join(name);
+    // A media filename must not read through a symlink outside the profile.
+    // Inspect the entry itself before following it (including broken links).
+    if std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err(format!("unsafe audio file name: {name}"));
+    }
     if path.is_file() {
         Ok(path)
     } else {
@@ -529,7 +534,6 @@ mod tests {
             "a\\b.mp3",
             "..",
             "../x.mp3",
-            "x..mp3",
             "/etc/passwd",
             "a\0b",
         ] {
@@ -539,5 +543,20 @@ mod tests {
         assert!(resolve(dir.path(), "nope.mp3")
             .unwrap_err()
             .contains("not found"));
+        std::fs::write(dir.path().join("x..mp3"), b"x").unwrap();
+        assert!(resolve(dir.path(), "x..mp3").is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn audio_does_not_follow_media_symlinks() {
+        let media = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("sound.mp3");
+        std::fs::write(&target, b"x").unwrap();
+        std::os::unix::fs::symlink(target, media.path().join("sound.mp3")).unwrap();
+        assert!(resolve(media.path(), "sound.mp3")
+            .unwrap_err()
+            .contains("unsafe"));
     }
 }

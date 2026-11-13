@@ -7,14 +7,23 @@ fn main() -> Result<()> {
     match std::env::args().skip(1).collect::<Vec<_>>().as_slice() {
         [command] if command == "setup" => setup::setup(root),
         #[cfg(feature = "fixtures")]
-        [command, flag, base] if command == "fixtures" && flag == "--base" => {
+        [command, flag, base]
+            if matches!(command.as_str(), "fixtures" | "study-fixtures") && flag == "--base" =>
+        {
+            let study = command == "study-fixtures";
             let base = Path::new(base);
             let checked = tanki_core::validate_profile(base)?;
             let profile = checked.join("tanki-fixture");
             std::fs::create_dir(&profile)?;
             let actor = tanki_core::CollectionActor::open(&profile)?;
-            actor.execute(tanki_core::Command::GenerateFixture)?;
-            for _ in 0..3 {
+            actor.execute(if study {
+                tanki_core::Command::GenerateStudyFixture
+            } else {
+                tanki_core::Command::GenerateFixture
+            })?;
+            // The golden-render fixture retains its original three reviews.
+            // Leave the study fixture's queues ready for interactive review.
+            for _ in 0..if study { 0 } else { 3 } {
                 if let tanki_core::Response::Queue(queue) =
                     actor.execute(tanki_core::Command::Queue { limit: 1 })?
                 {
@@ -34,6 +43,8 @@ fn main() -> Result<()> {
             println!("{}", profile.display());
             Ok(())
         }
-        _ => Err("usage: cargo xtask setup | fixtures --base EXISTING_TEMP_DIR".into()),
+        _ => Err(
+            "usage: cargo xtask setup | fixtures|study-fixtures --base EXISTING_TEMP_DIR".into(),
+        ),
     }
 }

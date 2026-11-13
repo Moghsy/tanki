@@ -635,17 +635,17 @@ Agree first (one short design step): the `tanki-core` command/response types for
 Streams (parallel after the interfaces exist):
 
 - **Core** (`tanki-core`):
-  - [ ] Card pipeline per 6.0: render, `{{FrontSide}}`, audio-tag extraction, type-answer placeholder detection, `compare_answer`.
-  - [ ] Study commands: queue, counts, next-state labels, answer with timing and `custom_data` copy, undo/redo.
-  - [ ] Card actions: flags, mark, bury card/note, suspend card/note, forget, set due date, delete note.
-  - [ ] Deck tree with counts, overview data, congrats info, studied-today line.
-  - [ ] Scheduler-version check and upgrade call.
+  - [x] Card pipeline per 6.0: render, `{{FrontSide}}`, audio-tag extraction, type-answer placeholder detection, `compare_answer`.
+  - [x] Study commands: queue, counts, next-state labels, answer with timing and `custom_data` copy, undo/redo.
+  - [x] Card actions: flags, mark, bury card/note, suspend card/note, forget, set due date, delete note.
+  - [x] Deck tree with counts, overview data, congrats info, studied-today line.
+  - [x] Scheduler-version check and upgrade call.
 - **Renderer** (`tanki-render`):
-  - [ ] html5ever parse; CSS subset cascade including `display:none`, class selectors, night-mode override (6.0 step 5).
-  - [ ] T0 layout per 6.2: inline styles, blocks, lists, tables, alignment, `<hr id=answer>`, sub/superscript, links.
-  - [ ] Cloze spans, hint and `<details>` toggles, replay-button widgets, type-answer diff colours.
-  - [ ] Image blocks: decode (jpeg, png, gif first frame, webp, svg via resvg), scale to cell pixel size, cache, off-thread.
-  - [ ] Snapshot tests for all six stock note types (R3 §6).
+  - [x] html5ever parse; CSS subset cascade including `display:none`, class selectors, night-mode override (6.0 step 5).
+  - [x] T0 layout per 6.2: inline styles, blocks, lists, tables, alignment, `<hr id=answer>`, sub/superscript, links.
+  - [x] Cloze spans, hint and `<details>` toggles, replay-button widgets, type-answer diff colours.
+  - [x] Image blocks: decode (jpeg, png, gif first frame, webp, svg via resvg), scale to cell pixel size, cache, off-thread.
+  - [x] Snapshot tests for all six stock note types (R3 §6). IO shows a mask-unavailable notice until the Phase 4 compositor; its image must not be treated as a completed occlusion rendering.
 - **Terminal** (`tanki-term`):
   - [x] Finish capability probe; ratatui-image integration with Unicode-placeholder, iTerm2, Sixel and half-block modes; `--graphics` override; live mode cycle. (`probe`, `Images`; encoding is synchronous on a cache miss, 10–50 ms per image depending on size. ratatui-image never deletes kitty images, so the TUI writes `Images::take_cleanup()` on screen changes. Inside tmux, ratatui-image runs `tmux set -p allow-passthrough on` for its pane.)
 - **Media** (`tanki-media`):
@@ -766,6 +766,9 @@ Each item names the phase that resolves it. Replace the entry with the result wh
 
 | Item | Source | Resolved in |
 |---|---|---|
+| **Study commands and Python parity (2026-11-13).** Core pipeline, all listed card actions, undo/redo, timing caps, custom-data preservation, deck screens and scheduler upgrade pass fixture tests. Lead ran the full workspace build, tests and clippy after the core merge. Live replay with the pinned Python package: 59 answers; queue order/counts identical at every step; 34 cards, 64 exported review-log rows and 24 notes exactly equal, including learning due times, modification times and FSRS state. No tolerances or normalization in tanki's comparison. Upstream dataset export excludes manual scheduling-only log entries and normalizes log USNs; those sync metadata are outside this check. See `tests/study_replay.rs` and `scripts/study-replay.py`. | Phase 1 exit test | Phase 1 core verified |
+| **T0/T1 renderer (2026-11-13).** Lead's full workspace build/test/clippy passed after merge. 25 renderer unit tests, 9 integration tests, ten cell-buffer snapshots from stock golden HTML and editor markup; cascade/hiding/night override, widgets, narrow/CJK/bidi layout, local CSS/media paths, image cells, all five required codecs and asynchronous cache checked. IO explicitly reports missing masks (Phase 4); MathJax stays source text until Phase 4. Terminal image placement, clipping and colours still need the user's manual session. | R3, R8 | Phase 1 renderer verified; visual check pending |
+| **Licence metadata gate corrected (2026-11-13).** Cargo metadata includes disabled optional terminal backends, so the gate now selects the active all-features Linux graph through `cargo tree`. Conservative expression policy remains; an exact-version choice records Apache-2.0 for `self_cell` 1.3.0, which ships that licence alongside its alternative GPL-2.0-only option. Five gate tests and 512 active packages pass. `unicase` remains pinned to 2.6.0. | 4.1, rule 17 | Phase 1 integration verified |
 | Patch 0001 compiles; tanki-core test passes shared state to the builder and converts idle/media-check progress to typed protobuf variants. Setup applies once, skips on rerun, rejects drift. | 4.1 | Phase 0 foundation verified |
 | **Sync works with public functions only (2026-11-13).** Against `SimpleServer` in-process on loopback: login (wrong password refused), first normal sync reports full sync required, full upload, full download (fixture only, backup first), normal sync in both directions between two clients, media sync (files byte-identical), typed progress for all three through patch 0001. Abort: `want_abort` gives `Interrupted` and a clean rollback on the same connection; dropping the future needs close-and-reopen, after which committed notes are intact and the next sync passes. `sync_login` returns an auth with no endpoint (which would mean AnkiWeb); Anki follows 308 redirects itself and reports `new_endpoint`, which Phase 2 must validate before saving. Server users come from `SYNC_USER*` variables read at start. Test: `actor::sync_spike::public_sync_round_trip`. | R1, R5 | Phase 0 spike A done |
 | **`partial_render` must be `true` (2026-11-13); R3 was right, R2 wrong.** `scripts/golden-render.py` renders a 22-card fixture with Anki's Python package built from the pinned source and stores question, answer, CSS and audio tags in `tests/fixtures/golden/render.json`; `tests/golden_render.rs` requires tanki-core to match exactly. With `false`, 19 fields differ: every `{{FrontSide}}` answer replays the question's audio or TTS, and built-in filters placed after an unknown filter get applied when desktop skips them. Three pipeline steps were missing and are now in `render`: a template error becomes the text of both sides; sound filenames are cut to their last path part; `[latex]`, `[$]`, `[$$]` become image tags, with Anki's "generation disabled" message when the image is absent. Collections are opened with real translations so localized card text matches desktop, isolation marks included. Not covered (they live in `aqt`): the `tts-voices` filter, add-on filters, reviewer-side media path encoding. | R2 vs R3 | Phase 0 spike B done |
