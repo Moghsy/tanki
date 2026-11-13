@@ -54,9 +54,10 @@ impl SyncEndpoint {
     }
 }
 
-// Anki follows protocol-level 308 redirects itself, using the Location header.
-// Blocking automatic redirects alone cannot prevent a redirected AnkiWeb request.
-// Deny its DNS resolution too, and disable proxies so they cannot resolve it instead.
+// Anki follows protocol-level 308 redirects itself, using the Location header,
+// so reqwest's redirect policy and the check in `SyncEndpoint::parse` do not
+// cover a server that redirects elsewhere. Refusing to resolve AnkiWeb's names
+// does, and proxies are disabled so that none can resolve them instead.
 #[cfg(test)]
 pub(super) fn client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
@@ -71,22 +72,24 @@ pub(super) fn client() -> Result<reqwest::Client> {
 #[cfg(test)]
 struct SelfHostedResolver;
 
+/// Decides before any lookup happens; kept separate so it can be tested
+/// without touching the network.
 #[cfg(test)]
-pub(super) static BLOCKED_RESOLUTIONS: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
+fn refuse_forbidden(name: &str) -> std::io::Result<()> {
+    if forbidden_host(name) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "AnkiWeb sync endpoints are forbidden",
+        ));
+    }
+    Ok(())
+}
 
 #[cfg(test)]
 impl reqwest::dns::Resolve for SelfHostedResolver {
     fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
         Box::pin(async move {
-            if forbidden_host(name.as_str()) {
-                BLOCKED_RESOLUTIONS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::PermissionDenied,
-                    "AnkiWeb sync endpoints are forbidden",
-                )
-                .into());
-            }
+            refuse_forbidden(name.as_str())?;
             let addresses = tokio::net::lookup_host((name.as_str(), 0)).await?;
             Ok(Box::new(addresses.collect::<Vec<_>>().into_iter()) as reqwest::dns::Addrs)
         })
@@ -117,5 +120,15 @@ mod tests {
             "http://127.0.0.1:1234/"
         );
         assert!(SyncEndpoint::parse("https://ankiweb.net.example.com/").is_ok());
+    }
+
+    #[test]
+    fn resolver_refuses_ankiweb_names_before_lookup() {
+        for name in ["ankiweb.net", "sync.ankiweb.net", "sync12.AnkiWeb.net."] {
+            let error = refuse_forbidden(name).unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        }
+        assert!(refuse_forbidden("localhost").is_ok());
+        assert!(refuse_forbidden("ankiweb.net.example.com").is_ok());
     }
 }

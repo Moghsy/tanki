@@ -52,13 +52,14 @@ impl Fixture {
         Ok(())
     }
 
+    /// Same rule as the actor: a written backup is followed by close and reopen,
+    /// because Anki's backup drops the cross-process file lock.
     fn backup(&mut self) -> Result<()> {
-        let folder = self.profile.join("backups");
-        if let Some(handle) = self.col().maybe_backup(folder, true)? {
-            handle
-                .join()
-                .map_err(|_| CoreError::Other("Backup panicked".into()))??;
+        let profile = self.profile.clone();
+        if backup(self.col(), &profile)? {
             self.joined_backups += 1;
+            self.col.take().unwrap().close(None)?;
+            self.reopen()?;
         }
         Ok(())
     }
@@ -99,10 +100,8 @@ impl Fixture {
 
     fn add(&mut self, front: &str) -> Result<()> {
         let mut queued = HashMap::new();
-        let profile = self.profile.clone();
         execute(
             self.col(),
-            &profile,
             Command::AddNote {
                 notetype: "Basic".into(),
                 fields: vec![front.into(), "answer".into()],
@@ -124,13 +123,11 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
-        if self.col.is_some() {
-            let saved = self.backup();
-            let closed = self.col.take().unwrap().close(None);
-            if let Err(error) = saved {
+        if let Some(mut col) = self.col.take() {
+            if let Err(error) = backup(&mut col, &self.profile) {
                 eprintln!("fixture exit backup: {error}");
             }
-            if let Err(error) = closed {
+            if let Err(error) = col.close(None) {
                 eprintln!("fixture exit close: {error}");
             }
         }
@@ -278,13 +275,14 @@ fn round_trip_on_actor() -> Result<()> {
     ));
     println!("media sync: SVG and WAV byte-for-byte; typed MediaSync progress");
 
-    abort_and_reopen(&rt, &mut a, &endpoint, &auth, &client)?;
-    redirected_endpoint_refused(&rt, &mut a, &auth, &client)?;
-    println!(
-        "BUILDHASH requested via environment, actual linked value: {:?}",
-        anki::version::buildhash()
-    );
-    println!("upstream build.rs overrides BUILDHASH from vendor/anki/out/buildhash");
+    abort_with_want_abort(&rt, &mut a, &endpoint, &auth, &client)?;
+    abort_by_drop_then_reopen(&rt, &mut a, &endpoint, &auth, &client)?;
+    protocol_redirect_is_followed(&rt, &mut a, &endpoint, &auth, &client)?;
+    // rslib/build.rs always sets BUILDHASH from vendor/anki/out/buildhash (empty
+    // when the file is absent), so a BUILDHASH build variable set by tanki is
+    // overridden and the client string is "anki,<version> (),<platform>".
+    assert_eq!(anki::version::buildhash(), "");
+    println!("client string build hash is empty; the server accepted it for every request above");
     a.backup()?;
     b.backup()?;
     println!(
@@ -297,28 +295,34 @@ fn round_trip_on_actor() -> Result<()> {
     Ok(())
 }
 
-fn abort_and_reopen(
+/// A proxy in front of the real server that parks `/sync/start`, the first
+/// request made after `normal_sync` has opened its local transaction. It
+/// signals `arrived`, then waits for `release` before forwarding.
+struct GatedProxy {
+    address: std::net::SocketAddr,
+    task: tokio::task::JoinHandle<()>,
+    arrived: Arc<Notify>,
+    release: Arc<Notify>,
+}
+
+fn gated_proxy(
     rt: &Runtime,
-    a: &mut Fixture,
     endpoint: &SyncEndpoint,
-    auth: &anki::sync::login::SyncAuth,
     client: &reqwest::Client,
-) -> Result<()> {
-    a.add("survives-aborted-sync")?;
-    // Hold /start after normal_sync has begun its local transaction. All earlier
-    // requests pass to the real SimpleServer; the start request is never forwarded.
+) -> Result<GatedProxy> {
     let arrived = Arc::new(Notify::new());
-    let notify = arrived.clone();
+    let release = Arc::new(Notify::new());
+    let (notify, gate) = (arrived.clone(), release.clone());
     let upstream = endpoint.as_str().to_string();
     let proxy_client = client.clone();
     let router = Router::new().fallback(move |req: Request<Body>| {
-        let notify = notify.clone();
+        let (notify, gate) = (notify.clone(), gate.clone());
         let upstream = upstream.clone();
         let client = proxy_client.clone();
         async move {
             if req.uri().path() == "/sync/start" {
                 notify.notify_one();
-                return std::future::pending::<axum::response::Response>().await;
+                gate.notified().await;
             }
             let (mut parts, body) = req.into_parts();
             let data = to_bytes(body, 10 * 1024 * 1024).await.unwrap();
@@ -344,7 +348,76 @@ fn abort_and_reopen(
             (status, headers, response.bytes().await.unwrap()).into_response()
         }
     });
-    let (address, proxy) = spawn_router(rt, router)?;
+    let (address, task) = spawn_router(rt, router)?;
+    Ok(GatedProxy {
+        address,
+        task,
+        arrived,
+        release,
+    })
+}
+
+/// Cooperative abort: `want_abort` is set on the shared progress state while a
+/// request is in flight. Upstream notices at its next progress check, rolls its
+/// transaction back and tells the server to abort. The collection stays usable
+/// with no reopen.
+fn abort_with_want_abort(
+    rt: &Runtime,
+    a: &mut Fixture,
+    endpoint: &SyncEndpoint,
+    auth: &anki::sync::login::SyncAuth,
+    client: &reqwest::Client,
+) -> Result<()> {
+    a.add("survives-cooperative-abort")?;
+    let GatedProxy {
+        address,
+        task: proxy,
+        arrived,
+        release,
+    } = gated_proxy(rt, endpoint, client)?;
+    let proxy_auth = SyncEndpoint::parse(&format!("http://{address}/"))?.auth(auth.hkey.clone());
+    let progress = a.progress.clone();
+    let outcome = rt.block_on(async {
+        let flag = async {
+            arrived.notified().await;
+            progress.lock().unwrap().want_abort = true;
+            release.notify_one();
+        };
+        tokio::join!(a.col().normal_sync(proxy_auth, client.clone()), flag).0
+    });
+    assert!(
+        matches!(outcome, Err(anki::error::AnkiError::Interrupted)),
+        "expected Interrupted, got {outcome:?}"
+    );
+    // Same connection, no reopen: reads, writes and the next sync all work.
+    assert_eq!(a.search("survives-cooperative-abort")?.len(), 1);
+    a.add("added-after-cooperative-abort")?;
+    let output = rt.block_on(a.col().normal_sync(auth.clone(), client.clone()))?;
+    assert!(matches!(output.required, SyncActionRequired::NoChanges));
+    proxy.abort();
+    println!(
+        "abort (want_abort): Interrupted returned; same connection kept working; next sync passed"
+    );
+    Ok(())
+}
+
+/// Hard abort: the sync future is dropped while its transaction is open (what
+/// happens if tanki cancels the task instead of asking). Upstream gets no
+/// chance to roll back, so the connection must be closed and reopened.
+fn abort_by_drop_then_reopen(
+    rt: &Runtime,
+    a: &mut Fixture,
+    endpoint: &SyncEndpoint,
+    auth: &anki::sync::login::SyncAuth,
+    client: &reqwest::Client,
+) -> Result<()> {
+    a.add("survives-dropped-sync")?;
+    let GatedProxy {
+        address,
+        task: proxy,
+        arrived,
+        release: _release,
+    } = gated_proxy(rt, endpoint, client)?;
     let proxy_auth = SyncEndpoint::parse(&format!("http://{address}/"))?.auth(auth.hkey.clone());
     let outcome = rt.block_on(async {
         tokio::select! {
@@ -355,25 +428,24 @@ fn abort_and_reopen(
                 Err(CoreError::Other("timed out waiting for sync start".into())),
         }
     });
-    // Shared progress and abort are accessible without touching Collection.
     assert!(matches!(
         a.typed_progress(),
         pb::collection::progress::Value::NormalSync(_)
     ));
-    a.progress.lock().unwrap().want_abort = true;
-    // Dropping the future leaves an open transaction. Closing the connection
-    // rolls it back; reopening is mandatory before any further command or backup.
+    // Closing the connection rolls the abandoned transaction back.
     a.col.take().unwrap().close(None)?;
     a.reopen()?;
     outcome?;
-    assert_eq!(a.search("survives-aborted-sync")?.len(), 1);
+    assert_eq!(a.search("survives-dropped-sync")?.len(), 1);
+    // The server still has the session open; tell it, as upstream would have.
     let _ = rt.block_on(anki::sync::collection::progress::sync_abort(
         auth.clone(),
         client.clone(),
     ));
-    rt.block_on(a.col().normal_sync(auth.clone(), client.clone()))?;
+    let output = rt.block_on(a.col().normal_sync(auth.clone(), client.clone()))?;
+    assert!(matches!(output.required, SyncActionRequired::NoChanges));
     proxy.abort();
-    println!("abort: cancelled after local transaction began; close/reopen retained note; next sync passed");
+    println!("abort (future dropped): close and reopen kept committed notes; next sync passed");
     Ok(())
 }
 
@@ -389,26 +461,30 @@ fn spawn_router(
     Ok((address, server))
 }
 
-fn redirected_endpoint_refused(
+/// Anki follows a protocol-level 308 itself (it reads the `Location` header and
+/// retries), so reqwest's redirect policy never sees it and validating the
+/// configured URL is not enough. Both servers here are on loopback: no test may
+/// provoke a request towards AnkiWeb, even one a guard is expected to stop.
+fn protocol_redirect_is_followed(
     rt: &Runtime,
     a: &mut Fixture,
+    endpoint: &SyncEndpoint,
     auth: &anki::sync::login::SyncAuth,
     client: &reqwest::Client,
 ) -> Result<()> {
-    let router = Router::new().fallback(|| async {
-        (StatusCode::PERMANENT_REDIRECT, [("location", "https://sync.ankiweb.net/")], "")
+    let target = endpoint.as_str().to_string();
+    let location = target.clone();
+    let router = Router::new().fallback(move || {
+        let location = location.clone();
+        async move { (StatusCode::PERMANENT_REDIRECT, [("location", location)], "") }
     });
     let (address, server) = spawn_router(rt, router)?;
-    let redirected = SyncEndpoint::parse(&format!("http://{address}/"))?.auth(auth.hkey.clone());
-    let blocked_before = crate::sync::BLOCKED_RESOLUTIONS.load(std::sync::atomic::Ordering::SeqCst);
-    let result = rt.block_on(a.col().normal_sync(redirected, client.clone()));
-    assert!(result.is_err(), "accepted protocol redirect to AnkiWeb");
-    assert_eq!(
-        crate::sync::BLOCKED_RESOLUTIONS.load(std::sync::atomic::Ordering::SeqCst),
-        blocked_before + 1,
-        "protocol redirect must be stopped before DNS lookup"
-    );
+    let redirecting = SyncEndpoint::parse(&format!("http://{address}/"))?.auth(auth.hkey.clone());
+    a.add("after-redirect")?;
+    let output = rt.block_on(a.col().normal_sync(redirecting, client.clone()))?;
+    assert_eq!(output.new_endpoint.as_deref(), Some(target.as_str()));
+    assert!(matches!(output.required, SyncActionRequired::NoChanges));
     server.abort();
-    println!("protocol 308 redirect to AnkiWeb refused by DNS guard before network contact");
+    println!("protocol 308: upstream followed it to {target} and reported new_endpoint");
     Ok(())
 }
