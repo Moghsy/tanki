@@ -245,6 +245,7 @@ def scenario_e_filtered_dialog(col, actions, extra) -> None:
 def scenario_e_fsrs_recompute(col, actions, extra) -> None:
     def change(cfg):
         cfg.desired_retention = 0.88
+        cfg.fsrs_params_6[0] = 0.35
 
     deck_options_save(col, change, actions)
 

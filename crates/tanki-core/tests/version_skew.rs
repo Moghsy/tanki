@@ -27,7 +27,7 @@ use pb::deck_config::deck_config::config::ReviewCardOrder;
 use pb::decks::deck::filtered::search_term::Order as FilteredOrder;
 use serde_json::Value;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     ffi::{OsStr, OsString},
     path::{Path, PathBuf},
     process,
@@ -118,12 +118,17 @@ fn run(exe: OsString, pinned: Option<OsString>) {
         snapshot(fixture.path()),
         "snapshots must be deterministic and side-effect free"
     );
+    dump("base", &base);
     check_fixture(&base, &ids);
-    println!("\n=== Spike D: Anki {DESKTOP_VERSION} on a collection written by the pinned core ===");
+    println!(
+        "\n=== Spike D: Anki {DESKTOP_VERSION} on a collection written by the pinned core ==="
+    );
     println!(
         "fixture: {} snapshot entries, {} cards",
         base.len(),
-        base.keys().filter(|k| k.ends_with(".id") && k.starts_with("card/")).count()
+        base.keys()
+            .filter(|k| k.ends_with(".id") && k.starts_with("card/"))
+            .count()
     );
 
     let mut results = BTreeMap::new();
@@ -179,7 +184,7 @@ const SCENARIOS: &[Scenario] = &[
     },
     Scenario {
         name: "e5_fsrs_recompute",
-        what: "deck options: desired retention 0.87 -> 0.88 (recomputes FSRS memory states)",
+        what: "deck options: desired retention 0.87 -> 0.88, FSRS w0 0.3 -> 0.35 (recomputes memory states)",
     },
 ];
 
@@ -212,6 +217,7 @@ fn run_scenario(
     );
     // The pinned core must reopen what the older version wrote.
     let after = snapshot(copy.path());
+    dump(&format!("{}-{}", scenario.name, python.version), &after);
     let changes = diff(base, &after);
     let actions = &report["actions"];
     println!(
@@ -223,9 +229,30 @@ fn run_scenario(
         report["col_before"], report["col_after"]
     );
     println!("actions: {actions}");
-    if let Some(extra) = report.get("extra").filter(|e| e.as_object().is_some_and(|o| !o.is_empty())) {
+    if let Some(extra) = report
+        .get("extra")
+        .filter(|e| e.as_object().is_some_and(|o| !o.is_empty()))
+    {
         println!("extra: {extra}");
     }
+    let cards: BTreeSet<&str> = base
+        .keys()
+        .filter(|k| k.starts_with("card/"))
+        .map(|k| object(k))
+        .collect();
+    let touched: BTreeSet<&str> = changes
+        .iter()
+        .map(|c| object(&c.path))
+        .filter(|o| o.starts_with("card/"))
+        .collect();
+    println!(
+        "pinned core reopened it: yes; schema {}; sync_status_offline {}; cards untouched \
+         (due, interval, FSRS state, custom data identical): {} of {}",
+        after["collection/schema_version"],
+        after["collection/sync_status_offline"],
+        cards.len() - touched.len(),
+        cards.len()
+    );
     let mut counts = BTreeMap::new();
     for change in &changes {
         let class = classify(scenario.name, change, ids, actions);
@@ -301,12 +328,16 @@ fn is_bookkeeping(path: &str) -> bool {
 
 /// Values that legitimately differ between two runs of the same scenario.
 fn is_volatile(path: &str) -> bool {
-    path.starts_with("revlog/") && path.ends_with(".time")
-        || last_segment(path) == "last_review_time_secs"
+    path.starts_with("revlog/") || last_segment(path) == "last_review_time_secs"
 }
 
 fn object(path: &str) -> &str {
     path.split('.').next().unwrap_or(path)
+}
+
+/// Whether a snapshot object is the card or one of its review log entries.
+fn is_card_or_revlog(obj: &str, card: i64) -> bool {
+    obj == format!("card/{card}") || obj.starts_with(&format!("revlog/{card}@"))
 }
 
 fn id_in(actions: &Value, key: &str) -> Vec<i64> {
@@ -344,12 +375,12 @@ fn classify(scenario: &str, change: &Change, ids: &Ids, actions: &Value) -> Clas
         }
         "d_daily_use" => {
             let answered = id_in(actions, "answered_card");
-            let card_hit = answered
-                .iter()
-                .any(|id| obj == format!("card/{id}") || obj == format!("revlog/{id}"));
+            let card_hit = answered.iter().any(|id| is_card_or_revlog(obj, *id));
             card_hit
                 || obj == format!("note/{}", ids.special_note)
                 || path == "config/collapseTime"
+                // The same setting, as the preferences message reports it.
+                || path == "preferences.scheduling.learn_ahead_secs"
                 || path == format!("deck/{}.name", ids.skew_deck)
                 || (obj == "deck/1" && is_deck_study_stat(path))
                 // Answering a card stores the current deck and queue state.
@@ -357,14 +388,12 @@ fn classify(scenario: &str, change: &Change, ids: &Ids, actions: &Value) -> Clas
                 || path == "config/activeDecks"
                 // The undo/last-answered bookkeeping keys.
                 || path.starts_with("config/_deck_")
-                || path == "deck_options/current_deck.limits.new_today"
-                || path == "deck_options/current_deck.limits.review_today"
+                || path == "deck_options.current_deck.limits.new_today"
+                || path == "deck_options.current_deck.limits.review_today"
         }
         "e2_empty_cards" => {
             let deleted = id_in(actions, "deleted_cards");
-            deleted
-                .iter()
-                .any(|id| obj == format!("card/{id}") || obj == format!("revlog/{id}"))
+            deleted.iter().any(|id| is_card_or_revlog(obj, *id))
         }
         "e3_filtered_round_trip" => {
             // Rebuilding moves cards in and out of the filtered deck.
@@ -377,17 +406,20 @@ fn classify(scenario: &str, change: &Change, ids: &Ids, actions: &Value) -> Clas
                 || path == "config/activeDecks"
         }
         "e4_filtered_dialog_save" => {
-            path.starts_with(&format!("deck/{}.kind.search_terms[0].order", ids.filtered_deck))
-                || (obj.starts_with("card/")
-                    && matches!(
-                        last_segment(path),
-                        "deck_id" | "original_deck_id" | "due" | "original_due" | "queue"
-                    ))
+            path.starts_with(&format!(
+                "deck/{}.kind.search_terms[0].order",
+                ids.filtered_deck
+            )) || (obj.starts_with("card/")
+                && matches!(
+                    last_segment(path),
+                    "deck_id" | "original_deck_id" | "due" | "original_due" | "queue"
+                ))
                 || path == "config/curDeck"
                 || path == "config/activeDecks"
         }
         "e5_fsrs_recompute" => {
             path == "deck_config/1.config.desired_retention"
+                || path == "deck_config/1.config.fsrs_params_6[0]"
                 || (obj.starts_with("card/")
                     && (path.contains(".memory_state.") || path.ends_with(".desired_retention")))
                 || (obj.starts_with("revlog/") && path.contains(".memory_state."))
@@ -413,10 +445,10 @@ fn unexpected<'a>(outcome: &'a Outcome, scenario: &str, ids: &Ids) -> Vec<&'a Ch
 // Assertions: what survives and what does not
 
 fn assert_findings(base: &Snapshot, ids: &Ids, results: &BTreeMap<&str, Outcome>, fixture: &Path) {
-    let preset_order = |s: &Snapshot, id: i64| s[&format!("deck_config/{id}.config.review_order")].clone();
-    let filtered_order = |s: &Snapshot| {
-        s[&format!("deck/{}.kind.search_terms[0].order", ids.filtered_deck)].clone()
-    };
+    let preset_order =
+        |s: &Snapshot, id: i64| s[&format!("deck_config/{id}.config.review_order")].clone();
+    let filtered_order =
+        |s: &Snapshot| s[&format!("deck/{}.kind.search_terms[0].order", ids.filtered_deck)].clone();
     for (name, outcome) in results {
         let report = &outcome.report;
         // 25.09.4 opens the file, schema 18 stays, and nothing it does here
@@ -427,25 +459,45 @@ fn assert_findings(base: &Snapshot, ids: &Ids, results: &BTreeMap<&str, Outcome>
             report["col_before"]["scm"], report["col_after"]["scm"],
             "{name}: schema-modified stamp changed"
         );
-        assert_eq!(report["col_before"]["ls"], report["col_after"]["ls"], "{name}");
+        assert_eq!(
+            report["col_before"]["ls"], report["col_after"]["ls"],
+            "{name}"
+        );
         assert_eq!(outcome.after["collection/schema_version"], "18", "{name}");
         // 25.09.4 reads the new enum values back as raw numbers.
         let observed = &report["observed"];
         assert_eq!(observed["presets"]["Default"]["review_order"], 12, "{name}");
-        assert_eq!(observed["presets"][SPARE_PRESET]["review_order"], 12, "{name}");
+        assert_eq!(
+            observed["presets"][SPARE_PRESET]["review_order"], 12,
+            "{name}"
+        );
         assert_eq!(observed["legacy_default_preset_reviewOrder"], 12, "{name}");
-        assert_eq!(observed["filtered_orders_proto"], serde_json::json!([10]), "{name}");
+        assert_eq!(
+            observed["filtered_orders_proto"],
+            serde_json::json!([10]),
+            "{name}"
+        );
         assert_eq!(observed["filtered_terms_legacy"][0][2], 10, "{name}");
-        assert_eq!(observed["config_experimentalFeatures"], serde_json::json!({"1": true}));
+        assert_eq!(
+            observed["config_experimentalFeatures"],
+            serde_json::json!({"1": true})
+        );
         // The new review order survives every scenario, on both presets.
-        assert_eq!(preset_order(&outcome.after, 1), "RelativeOverdueness", "{name}");
+        assert_eq!(
+            preset_order(&outcome.after, 1),
+            "RelativeOverdueness",
+            "{name}"
+        );
         assert_eq!(
             preset_order(&outcome.after, ids.spare_preset),
             "RelativeOverdueness",
             "{name}"
         );
         // New config keys survive.
-        assert_eq!(outcome.after["config/experimentalFeatures"], r#"{"1":true}"#, "{name}");
+        assert_eq!(
+            outcome.after["config/experimentalFeatures"], r#"{"1":true}"#,
+            "{name}"
+        );
         // Custom data survives.
         assert_eq!(
             outcome.after[&format!("card/{}.custom_data", ids.custom_data_card)],
@@ -453,7 +505,11 @@ fn assert_findings(base: &Snapshot, ids: &Ids, results: &BTreeMap<&str, Outcome>
             "{name}"
         );
         if *name != "e4_filtered_dialog_save" {
-            assert_eq!(filtered_order(&outcome.after), "RelativeOverdueness", "{name}");
+            assert_eq!(
+                filtered_order(&outcome.after),
+                "RelativeOverdueness",
+                "{name}"
+            );
         }
     }
 
@@ -472,7 +528,10 @@ fn assert_findings(base: &Snapshot, ids: &Ids, results: &BTreeMap<&str, Outcome>
     let d = &results["d_daily_use"];
     let left = unexpected(d, "d_daily_use", ids);
     assert!(left.is_empty(), "d_daily_use: {left:#?}");
-    assert_eq!(d.after[&format!("deck/{}.name", ids.skew_deck)], format!("{SKEW_DECK_RENAMED:?}"));
+    assert_eq!(
+        d.after[&format!("deck/{}.name", ids.skew_deck)],
+        format!("{SKEW_DECK_RENAMED:?}")
+    );
     // The deck-level overrides survive the rename.
     for field in ["review_limit", "new_limit", "desired_retention"] {
         let key = format!("deck/{}.kind.{field}", ids.skew_deck);
@@ -484,7 +543,12 @@ fn assert_findings(base: &Snapshot, ids: &Ids, results: &BTreeMap<&str, Outcome>
     }
     // The moved card's FSRS state (computed by the pinned core on set_deck)
     // is untouched.
-    for field in ["memory_state.stability", "memory_state.difficulty", "desired_retention", "due"] {
+    for field in [
+        "memory_state.stability",
+        "memory_state.difficulty",
+        "desired_retention",
+        "due",
+    ] {
         let key = format!("card/{}.{field}", ids.moved_card);
         assert_eq!(d.after[&key], base[&key], "{key}");
     }
@@ -498,16 +562,36 @@ fn assert_findings(base: &Snapshot, ids: &Ids, results: &BTreeMap<&str, Outcome>
     // empty; its Empty Cards tool deletes it.
     let e2 = &results["e2_empty_cards"];
     let deleted = id_in(&e2.report["actions"], "deleted_cards");
-    assert_eq!(deleted, vec![ids.special_cards[1]], "25.09.4 empty-cards deletion");
-    assert!(!e2.after.contains_key(&format!("card/{}.id", ids.special_cards[1])));
+    assert_eq!(
+        deleted,
+        vec![ids.special_cards[1]],
+        "25.09.4 empty-cards deletion"
+    );
+    assert!(!e2
+        .after
+        .contains_key(&format!("card/{}.id", ids.special_cards[1])));
     assert_eq!(base["derived/empty_cards_newer_core"], "[]");
     let left = unexpected(e2, "e2_empty_cards", ids);
     assert!(left.is_empty(), "e2_empty_cards: {left:#?}");
 
-    // (e3): proto round trip, legacy saves and a rebuild keep order 10.
+    // (e3): proto round trip, legacy saves and a rebuild keep order 10, but
+    // 25.09.4 rebuilds with its default order instead (prost's getter maps
+    // the unknown value to OLDEST_REVIEWED_FIRST). Which cards that selects
+    // depends on hash tie-breaks, so it is printed, not asserted.
     let e3 = &results["e3_filtered_round_trip"];
     let left = unexpected(e3, "e3_filtered_round_trip", ids);
     assert!(left.is_empty(), "e3_filtered_round_trip: {left:#?}");
+    let members = |s: &Snapshot| -> Vec<String> {
+        s.iter()
+            .filter(|(k, v)| k.ends_with(".deck_id") && **v == ids.filtered_deck.to_string())
+            .map(|(k, _)| object(k).to_string())
+            .collect()
+    };
+    println!(
+        "\ne3: filtered deck members: built by pinned core {:?}; after 25.09.4 rebuild {:?}",
+        members(base),
+        members(&e3.after)
+    );
 
     // (e4): the 25.09.4 dialog would store -1, which both cores read as the
     // default order (oldest reviewed first).
@@ -535,6 +619,9 @@ fn assert_findings(base: &Snapshot, ids: &Ids, results: &BTreeMap<&str, Outcome>
          edit: {compared} values, max relative difference {max_rel:.2e}"
     );
     assert!(compared > 0);
+    // For these short histories the two FSRS crates (5.1.0 in 25.09.4, 6.6.1
+    // in the pinned core) agree exactly.
+    assert!(max_rel < 1e-6, "FSRS recompute differs: {max_rel}");
     let dr_key = format!("card/{}.desired_retention", ids.moved_card);
     println!(
         "e5: moved card (deck override 0.93) desired_retention: before {}, {DESKTOP_VERSION} {}, pinned {}",
@@ -546,16 +633,19 @@ fn assert_findings(base: &Snapshot, ids: &Ids, results: &BTreeMap<&str, Outcome>
 fn native_fsrs_recompute(fixture: &Path) -> Snapshot {
     let copy = copy_profile(fixture);
     let mut col = open(copy.path());
-    let data = DeckConfigService::get_deck_configs_for_update(&mut col, pb::decks::DeckId { did: 1 })
-        .unwrap();
+    let data =
+        DeckConfigService::get_deck_configs_for_update(&mut col, pb::decks::DeckId { did: 1 })
+            .unwrap();
     let mut current = data
         .all_config
         .iter()
         .filter_map(|c| c.config.clone())
         .find(|c| c.id == data.current_deck.as_ref().unwrap().config_id)
         .unwrap();
-    current.config.as_mut().unwrap().desired_retention = 0.88;
-    DeckConfigService::update_deck_configs(
+    let inner = current.config.as_mut().unwrap();
+    inner.desired_retention = 0.88;
+    inner.fsrs_params_6[0] = 0.35;
+    let _ = DeckConfigService::update_deck_configs(
         &mut col,
         pb::deck_config::UpdateDeckConfigsRequest {
             target_deck_id: 1,
@@ -623,6 +713,17 @@ fn build_fixture(profile: &Path) -> Ids {
             })
             .unwrap();
     }
+    // Keep some new cards outside the filtered deck built below. (If every
+    // new card sits in a filtered deck, Check Database in both versions resets
+    // `nextPos` to 0 because filtered new cards have negative due numbers.)
+    for i in 0..3 {
+        actor
+            .execute(Command::AddNote {
+                notetype: "Basic".into(),
+                fields: vec![format!("Extra front {i}"), format!("Extra back {i}")],
+            })
+            .unwrap();
+    }
     actor.close().unwrap();
 
     // 2. Directly: everything the pinned core can store, set to non-defaults.
@@ -652,7 +753,7 @@ fn build_fixture(profile: &Path) -> Ids {
     spare.id = 0;
     spare.name = SPARE_PRESET.into();
     spare.config.as_mut().unwrap().new_per_day = 44;
-    DeckConfigService::update_deck_configs(
+    let _ = DeckConfigService::update_deck_configs(
         &mut col,
         pb::deck_config::UpdateDeckConfigsRequest {
             target_deck_id: 1,
@@ -671,17 +772,15 @@ fn build_fixture(profile: &Path) -> Ids {
         },
     )
     .unwrap();
-    let spare_preset = DeckConfigService::get_deck_configs_for_update(
-        &mut col,
-        pb::decks::DeckId { did: 1 },
-    )
-    .unwrap()
-    .all_config
-    .into_iter()
-    .filter_map(|c| c.config)
-    .find(|c| c.name == SPARE_PRESET)
-    .unwrap()
-    .id;
+    let spare_preset =
+        DeckConfigService::get_deck_configs_for_update(&mut col, pb::decks::DeckId { did: 1 })
+            .unwrap()
+            .all_config
+            .into_iter()
+            .filter_map(|c| c.config)
+            .find(|c| c.name == SPARE_PRESET)
+            .unwrap()
+            .id;
 
     // Config keys written by 26.08 desktop (Python side); the core never
     // writes them, but a profile used with 26.08 desktop can carry them.
@@ -689,7 +788,7 @@ fn build_fixture(profile: &Path) -> Ids {
         ("experimentalFeatures", r#"{"1":true}"#),
         ("customColorPickerPalette", r##"["#ff0000"]"##),
     ] {
-        ConfigService::set_config_json(
+        let _ = ConfigService::set_config_json(
             &mut col,
             pb::config::SetConfigJsonRequest {
                 key: key.into(),
@@ -721,9 +820,13 @@ fn build_fixture(profile: &Path) -> Ids {
     )
     .unwrap()
     .id;
-    let mut note =
-        NotesService::new_note(&mut col, pb::notetypes::NotetypeId { ntid: special_notetype })
-            .unwrap();
+    let mut note = NotesService::new_note(
+        &mut col,
+        pb::notetypes::NotetypeId {
+            ntid: special_notetype,
+        },
+    )
+    .unwrap();
     note.fields = vec!["Special front".into(), "Special back".into()];
     note.tags = vec!["skew".into()];
     let special_note = NotesService::add_note(
@@ -741,7 +844,11 @@ fn build_fixture(profile: &Path) -> Ids {
             .unwrap()
             .template_idx
     });
-    assert_eq!(special_cards.len(), 2, "pinned core makes the {{#Tags}} card");
+    assert_eq!(
+        special_cards.len(),
+        2,
+        "pinned core makes the {{#Tags}} card"
+    );
 
     // A normal deck with deck-level overrides.
     let mut deck = DecksService::new_deck(&mut col).unwrap();
@@ -768,7 +875,7 @@ fn build_fixture(profile: &Path) -> Ids {
         .into_iter()
         .find(|id| *id != custom_data_card)
         .expect("a review card with FSRS state");
-    CardsService::set_deck(
+    let _ = CardsService::set_deck(
         &mut col,
         pb::cards::SetDeckRequest {
             card_ids: vec![moved_card],
@@ -790,7 +897,7 @@ fn build_fixture(profile: &Path) -> Ids {
     let filtered_deck = DecksService::add_or_update_filtered_deck(&mut col, filtered)
         .unwrap()
         .id;
-    DecksService::set_current_deck(&mut col, pb::decks::DeckId { did: 1 }).unwrap();
+    let _ = DecksService::set_current_deck(&mut col, pb::decks::DeckId { did: 1 }).unwrap();
     col.close(None).unwrap();
 
     Ids {
@@ -837,7 +944,7 @@ fn answer_direct(col: &mut Collection, rating: i32, custom_data: Option<String>)
     }
     .unwrap();
     new_state.custom_data = custom_data;
-    SchedulerService::answer_card(
+    let _ = SchedulerService::answer_card(
         col,
         pb::scheduler::CardAnswer {
             card_id: card.id,
@@ -853,15 +960,24 @@ fn answer_direct(col: &mut Collection, rating: i32, custom_data: Option<String>)
 }
 
 fn check_fixture(base: &Snapshot, ids: &Ids) {
-    assert_eq!(base["deck_config/1.config.review_order"], "RelativeOverdueness");
+    assert_eq!(
+        base["deck_config/1.config.review_order"],
+        "RelativeOverdueness"
+    );
     assert_eq!(
         base[&format!("deck/{}.kind.search_terms[0].order", ids.filtered_deck)],
         "RelativeOverdueness"
     );
-    assert_eq!(base["deck_options/fsrs"], "true");
-    assert_eq!(base[&format!("card/{}.custom_data", ids.custom_data_card)], r#""{\"skew\":\"yes\"}""#);
+    assert_eq!(base["deck_options.fsrs"], "true");
+    assert_eq!(
+        base[&format!("card/{}.custom_data", ids.custom_data_card)],
+        r#""{\"skew\":\"yes\"}""#
+    );
     assert!(base.contains_key(&format!("card/{}.memory_state.stability", ids.moved_card)));
-    assert_eq!(base[&format!("card/{}.desired_retention", ids.moved_card)], "0.93");
+    assert_eq!(
+        base[&format!("card/{}.desired_retention", ids.moved_card)],
+        "0.93"
+    );
     let with_state = base
         .keys()
         .filter(|k| k.starts_with("card/") && k.ends_with(".memory_state.stability"))
@@ -881,7 +997,8 @@ fn schema_version(profile: &Path) -> i64 {
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
     )
     .unwrap();
-    conn.query_row("select ver from col", [], |r| r.get(0)).unwrap()
+    conn.query_row("select ver from col", [], |r| r.get(0))
+        .unwrap()
 }
 
 fn snapshot(profile: &Path) -> Snapshot {
@@ -896,6 +1013,9 @@ fn snapshot(profile: &Path) -> Snapshot {
         format!("{:?}", col.sync_status_offline().unwrap()),
     );
 
+    // Raw `other` bytes are shown as text; they replace the byte lists that
+    // `flatten` writes for the same paths.
+    let mut others: Vec<(String, String)> = Vec::new();
     let mut options =
         DeckConfigService::get_deck_configs_for_update(&mut col, pb::decks::DeckId { did: 1 })
             .unwrap();
@@ -904,7 +1024,10 @@ fn snapshot(profile: &Path) -> Snapshot {
         let prefix = format!("deck_config/{}", config.id);
         s.insert(format!("{prefix}.use_count"), entry.use_count.to_string());
         if let Some(inner) = config.config.as_mut() {
-            s.insert(format!("{prefix}.config.other"), take_text(&mut inner.other));
+            others.push((
+                format!("{prefix}.config.other"),
+                take_text(&mut inner.other),
+            ));
         }
         flatten(&prefix, &format!("{config:#?}"), &mut s);
     }
@@ -920,10 +1043,14 @@ fn snapshot(profile: &Path) -> Snapshot {
     )
     .unwrap();
     for entry in decks.entries {
-        let mut deck = DecksService::get_deck(&mut col, pb::decks::DeckId { did: entry.id }).unwrap();
+        let mut deck =
+            DecksService::get_deck(&mut col, pb::decks::DeckId { did: entry.id }).unwrap();
         let prefix = format!("deck/{}", deck.id);
         if let Some(common) = deck.common.as_mut() {
-            s.insert(format!("{prefix}.common.other"), take_text(&mut common.other));
+            others.push((
+                format!("{prefix}.common.other"),
+                take_text(&mut common.other),
+            ));
         }
         flatten(&prefix, &format!("{deck:#?}"), &mut s);
     }
@@ -937,27 +1064,32 @@ fn snapshot(profile: &Path) -> Snapshot {
                 .unwrap();
         let prefix = format!("notetype/{}", nt.id);
         if let Some(config) = nt.config.as_mut() {
-            s.insert(format!("{prefix}.config.other"), take_text(&mut config.other));
+            others.push((
+                format!("{prefix}.config.other"),
+                take_text(&mut config.other),
+            ));
         }
         for (i, field) in nt.fields.iter_mut().enumerate() {
             if let Some(config) = field.config.as_mut() {
-                s.insert(format!("{prefix}.fields[{i}].config.other"), take_text(&mut config.other));
+                others.push((
+                    format!("{prefix}.fields[{i}].config.other"),
+                    take_text(&mut config.other),
+                ));
             }
         }
         for (i, template) in nt.templates.iter_mut().enumerate() {
             if let Some(config) = template.config.as_mut() {
-                s.insert(
+                others.push((
                     format!("{prefix}.templates[{i}].config.other"),
                     take_text(&mut config.other),
-                );
+                ));
             }
         }
         flatten(&prefix, &format!("{nt:#?}"), &mut s);
     }
 
     let config: Value =
-        serde_json::from_slice(&ConfigService::get_all_config(&mut col).unwrap().json)
-            .unwrap();
+        serde_json::from_slice(&ConfigService::get_all_config(&mut col).unwrap().json).unwrap();
     for (key, value) in config.as_object().unwrap() {
         s.insert(format!("config/{key}"), canonical_json(value));
     }
@@ -968,8 +1100,13 @@ fn snapshot(profile: &Path) -> Snapshot {
         let card = CardsService::get_card(&mut col, pb::cards::CardId { cid }).unwrap();
         flatten(&format!("card/{cid}"), &format!("{card:#?}"), &mut s);
         let logs = StatsService::get_review_logs(&mut col, pb::cards::CardId { cid }).unwrap();
-        for (i, entry) in logs.entries.iter().enumerate() {
-            flatten(&format!("revlog/{cid}[{i}]"), &format!("{entry:#?}"), &mut s);
+        // Keyed by time, so a new entry does not shift the others.
+        let mut seen = BTreeMap::new();
+        for entry in &logs.entries {
+            let n = seen.entry(entry.time).or_insert(0);
+            *n += 1;
+            let key = format!("revlog/{cid}@{}#{n}", entry.time);
+            flatten(&key, &format!("{entry:#?}"), &mut s);
         }
     }
     let notes = SearchService::search_notes(
@@ -993,7 +1130,11 @@ fn snapshot(profile: &Path) -> Snapshot {
         .flat_map(|n| n.card_ids)
         .collect();
     empty.sort();
-    s.insert("derived/empty_cards_newer_core".into(), format!("{empty:?}"));
+    s.insert(
+        "derived/empty_cards_newer_core".into(),
+        format!("{empty:?}"),
+    );
+    s.extend(others);
     col.close(None).unwrap();
     s
 }
@@ -1018,7 +1159,14 @@ fn canonical_json(value: &Value) -> String {
             format!("{{{}}}", inner.join(","))
         }
         Value::Array(items) => {
-            format!("[{}]", items.iter().map(canonical_json).collect::<Vec<_>>().join(","))
+            format!(
+                "[{}]",
+                items
+                    .iter()
+                    .map(canonical_json)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
         }
         other => other.to_string(),
     }
@@ -1051,10 +1199,9 @@ fn flatten(prefix: &str, text: &str, out: &mut Snapshot) {
         let (path, rest) = if top.array {
             top.next += 1;
             (format!("{}[{}]", top.path, top.next - 1), line)
-        } else if let Some((key, value)) = line
-            .split_once(": ")
-            .filter(|(k, _)| !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
-        {
+        } else if let Some((key, value)) = line.split_once(": ").filter(|(k, _)| {
+            !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        }) {
             (format!("{}.{key}", top.path), value)
         } else {
             // A type name such as `Some(` or `Config {`: transparent.
@@ -1070,6 +1217,17 @@ fn flatten(prefix: &str, text: &str, out: &mut Snapshot) {
             let previous = out.insert(path.clone(), rest.to_string());
             assert!(previous.is_none(), "duplicate snapshot path {path}");
         }
+    }
+}
+
+/// With `TANKI_SKEW_DUMP_DIR` set, writes each snapshot there as text.
+fn dump(name: &str, snapshot: &Snapshot) {
+    if let Some(dir) = std::env::var_os("TANKI_SKEW_DUMP_DIR").filter(|v| !v.is_empty()) {
+        let text: String = snapshot
+            .iter()
+            .map(|(k, v)| format!("{k} = {v}\n"))
+            .collect();
+        std::fs::write(Path::new(&dir).join(format!("{name}.txt")), text).unwrap();
     }
 }
 
@@ -1117,7 +1275,11 @@ fn diff(before: &Snapshot, after: &Snapshot) -> Vec<Change> {
 
 fn copy_profile(src: &Path) -> tempfile::TempDir {
     let dst = tempfile::tempdir().unwrap();
-    for name in ["collection.anki2", "collection.anki2-wal", "collection.media.db2"] {
+    for name in [
+        "collection.anki2",
+        "collection.anki2-wal",
+        "collection.media.db2",
+    ] {
         let from = src.join(name);
         if from.exists() {
             std::fs::copy(&from, dst.path().join(name)).unwrap();
@@ -1125,7 +1287,10 @@ fn copy_profile(src: &Path) -> tempfile::TempDir {
     }
     assert!(
         !src.join("collection.anki2-wal").exists()
-            || std::fs::metadata(src.join("collection.anki2-wal")).unwrap().len() == 0,
+            || std::fs::metadata(src.join("collection.anki2-wal"))
+                .unwrap()
+                .len()
+                == 0,
         "fixture must be closed cleanly before copying"
     );
     let media = dst.path().join("collection.media");
@@ -1159,7 +1324,9 @@ impl Python {
         if let Some(path) = &self.pythonpath {
             cmd.env("PYTHONPATH", path);
         }
-        let output = cmd.output().unwrap_or_else(|e| panic!("running {:?}: {e}", self.exe));
+        let output = cmd
+            .output()
+            .unwrap_or_else(|e| panic!("running {:?}: {e}", self.exe));
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
         let value = stdout
@@ -1181,6 +1348,10 @@ impl Python {
     }
 
     fn run(&self, scenario: &str, collection: &Path) -> (i32, Value) {
-        self.command(&[OsStr::new("run"), OsStr::new(scenario), collection.as_os_str()])
+        self.command(&[
+            OsStr::new("run"),
+            OsStr::new(scenario),
+            collection.as_os_str(),
+        ])
     }
 }
