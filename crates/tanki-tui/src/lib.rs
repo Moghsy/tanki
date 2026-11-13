@@ -6,6 +6,7 @@ pub mod backend;
 pub mod fuzzy;
 pub mod input;
 pub mod keymap;
+pub mod links;
 pub mod reviewer;
 pub mod services;
 pub mod terminal;

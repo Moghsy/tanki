@@ -62,6 +62,7 @@ fn timer_text(secs: u64) -> String {
 
 impl App<'_> {
     pub fn draw(&mut self, frame: &mut Frame) {
+        self.services.renderer.begin_frame();
         let area = frame.area();
         if area.height < 10 || area.width < 50 {
             frame.render_widget(
@@ -69,6 +70,9 @@ impl App<'_> {
                     .wrap(Wrap { trim: true }),
                 area,
             );
+            self.services
+                .renderer
+                .finish_frame(frame.buffer_mut(), false);
             return;
         }
         let main = Rect::new(area.x, area.y, area.width, area.height - 1);
@@ -84,6 +88,9 @@ impl App<'_> {
         }
         self.draw_overlay(frame, main);
         self.draw_status(frame.buffer_mut(), status);
+        self.services
+            .renderer
+            .finish_frame(frame.buffer_mut(), self.overlay.is_none());
     }
 
     // ---- deck list ---------------------------------------------------------
@@ -423,6 +430,7 @@ impl App<'_> {
                 block.width.min(card_area.width.saturating_sub(block.col)),
                 block.height,
             );
+            self.services.renderer.obscure_links(rect);
             match self.services.images.draw(&block.source, rect, buf) {
                 ImageState::Drawn => {}
                 ImageState::Loading => {
@@ -454,6 +462,9 @@ impl App<'_> {
                         .width
                         .max(20)
                         .min(card_area.right().saturating_sub(x));
+                    self.services
+                        .renderer
+                        .obscure_links(Rect::new(x, y, width, 1));
                     let style = Style::default().add_modifier(Modifier::UNDERLINED);
                     let blank = " ".repeat(width as usize);
                     buf.set_stringn(x, y, &blank, width as usize, style);
@@ -474,6 +485,12 @@ impl App<'_> {
         let total = card.lines.len();
         if total > scroll + card_area.height as usize {
             let text = "↓ more (j/PgDn)";
+            self.services.renderer.obscure_links(Rect::new(
+                card_area.right().saturating_sub(text.width() as u16),
+                card_area.bottom().saturating_sub(1),
+                text.width() as u16,
+                1,
+            ));
             buf.set_string(
                 card_area.right().saturating_sub(text.width() as u16),
                 card_area.bottom().saturating_sub(1),
@@ -482,6 +499,12 @@ impl App<'_> {
             );
         }
         if scroll > 0 {
+            self.services.renderer.obscure_links(Rect::new(
+                card_area.right().saturating_sub(1),
+                card_area.y,
+                1,
+                1,
+            ));
             buf.set_string(card_area.right().saturating_sub(1), card_area.y, "↑", dim());
         }
         self.draw_review_bar(buf, bar);
