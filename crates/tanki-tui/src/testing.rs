@@ -253,7 +253,11 @@ impl Backend for FakeBackend {
                 expected, provided, ..
             } => Response::Html(format!("<code id=typeans>{provided}|{expected}</code>")),
             Command::SetFlag { card_ids, flag } => {
-                for c in s.cards.iter_mut().filter(|c| card_ids.contains(&c.queued.id)) {
+                for c in s
+                    .cards
+                    .iter_mut()
+                    .filter(|c| card_ids.contains(&c.queued.id))
+                {
                     c.queued.flag = flag;
                 }
                 Response::Changes(OpChanges {

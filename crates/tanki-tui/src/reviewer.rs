@@ -155,7 +155,6 @@ pub struct Reviewer {
     auto_advance: bool,
     auto: Option<AutoTimer>,
     warned_custom: bool,
-    noted_fallback: bool,
     next_day_at: Option<i64>,
     /// Hint and `<details>` widgets the user opened (renderer keys).
     pub expanded: BTreeSet<String>,
@@ -177,7 +176,6 @@ impl Reviewer {
             auto_advance: false,
             auto: None,
             warned_custom: false,
-            noted_fallback: false,
             next_day_at: None,
             expanded: BTreeSet::new(),
         }
@@ -202,7 +200,9 @@ impl Reviewer {
     }
     /// The type-answer input while the question is shown.
     pub fn typed(&self) -> Option<&TextInput> {
-        self.typed.as_ref().filter(|_| self.phase == Phase::Question)
+        self.typed
+            .as_ref()
+            .filter(|_| self.phase == Phase::Question)
     }
     pub fn typed_mut(&mut self) -> Option<&mut TextInput> {
         if self.phase == Phase::Question {
@@ -267,11 +267,10 @@ impl Reviewer {
         self.timebox_reps = 0;
         self.timebox_pending = false;
         self.next_day_at = backend::sched_timing(b).ok().map(|t| t.next_day_at);
-        // An error here (the core not ready) does not block studying.
-        if let Ok(status) = backend::scheduler_status(b) {
-            if !status.v3 {
-                return vec![Effect::SchedulerUpgradeRequired];
-            }
+        match backend::scheduler_status(b) {
+            Ok(status) if !status.v3 => return vec![Effect::SchedulerUpgradeRequired],
+            Err(error) => return vec![Effect::Error(error.to_string())],
+            Ok(_) => {}
         }
         self.next_card(b, now)
     }
@@ -341,23 +340,10 @@ impl Reviewer {
         &mut self,
         b: &dyn Backend,
         queued: QueuedCard,
-        fx: &mut Vec<Effect>,
+        _fx: &mut Vec<Effect>,
     ) -> backend::Result<ReviewCard> {
         let rendered = backend::render(b, queued.id)?;
-        let config = match backend::study_config(b, queued.id) {
-            Ok(config) => config,
-            Err(e) => {
-                if !self.noted_fallback {
-                    self.noted_fallback = true;
-                    if !backend::not_implemented(&e) {
-                        fx.push(Effect::Error(format!(
-                            "Using default study settings: {e}"
-                        )));
-                    }
-                }
-                backend::fallback_study_config()
-            }
-        };
+        let config = backend::study_config(b, queued.id)?;
         Ok(ReviewCard {
             question_audio: rendered.question_audio.iter().map(media_tag).collect(),
             answer_audio: rendered.answer_audio.iter().map(media_tag).collect(),
@@ -645,7 +631,13 @@ impl Reviewer {
         }
     }
 
-    fn fire_auto(&mut self, b: &dyn Backend, timer: AutoTimer, now: Now, focused: bool) -> Vec<Effect> {
+    fn fire_auto(
+        &mut self,
+        b: &dyn Backend,
+        timer: AutoTimer,
+        now: Now,
+        focused: bool,
+    ) -> Vec<Effect> {
         self.auto = None;
         if !self.auto_advance {
             return Vec::new();
@@ -753,7 +745,12 @@ impl Reviewer {
         } else {
             Target::Cards(vec![card_id])
         };
-        self.mutate(b, Command::BuryOrSuspend { target, mode }, Some(notice), now)
+        self.mutate(
+            b,
+            Command::BuryOrSuspend { target, mode },
+            Some(notice),
+            now,
+        )
     }
     /// `-`.
     pub fn bury_card(&mut self, b: &dyn Backend, now: Now) -> Vec<Effect> {

@@ -1,0 +1,84 @@
+ Type
+ 日 本  123r
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+                                   1 + 0 + 0
+                               Show Answer  Space                        More m
+ fixture │ 1 0 0                                         ♪ on │ ▣ text │ ? help
+
+Buffer {
+    area: Rect { x: 0, y: 0, width: 80, height: 24 },
+    content: [
+        " Type                                                                           ",
+        " 日本 123r                                                                      ", // hidden by multi-width symbols: [(2, " "), (4, " ")]
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "                                   1 + 0 + 0                                    ",
+        "                               Show Answer  Space                        More m ",
+        " fixture │ 1 0 0                                         ♪ on │ ▣ text │ ? help ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 1, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: UNDERLINED,
+        x: 2, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: UNDERLINED,
+        x: 4, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 5, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: UNDERLINED,
+        x: 31, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 20, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 21, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 35, y: 21, fg: LightBlue, bg: Reset, underline: Reset, modifier: UNDERLINED,
+        x: 36, y: 21, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 39, y: 21, fg: LightRed, bg: Reset, underline: Reset, modifier: NONE,
+        x: 40, y: 21, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 43, y: 21, fg: LightGreen, bg: Reset, underline: Reset, modifier: NONE,
+        x: 44, y: 21, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 30, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
+        x: 43, y: 22, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 49, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 73, y: 22, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 79, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: BOLD,
+        x: 9, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 11, y: 23, fg: LightBlue, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 12, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 13, y: 23, fg: DarkGray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 14, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 15, y: 23, fg: DarkGray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 16, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+    ]
+}

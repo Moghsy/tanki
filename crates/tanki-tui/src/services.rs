@@ -10,11 +10,11 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use tanki_media::rules::{self, Side};
 use tanki_media::MediaTag;
-use tanki_render::{
-    AudioSide, CardSide, ImageSource, Line, RenderOptions, RenderedCard, Rgb, Span, Style, Widget,
-    WidgetKind,
-};
+use tanki_render::{AudioSide, CardSide, ImageSource, RenderOptions, RenderedCard, Rgb, Style};
+#[cfg(test)]
+use tanki_render::{Line, Span, Widget, WidgetKind};
 use tanki_term::{Capabilities, GraphicsMode};
+#[cfg(test)]
 use unicode_width::UnicodeWidthStr;
 
 // ---- card rendering ---------------------------------------------------------
@@ -36,11 +36,12 @@ impl CardRenderer for AnkiRenderer {
     }
 }
 
-/// TEMPORARY development fallback while tanki-render is a stub: strips tags
-/// to wrapped plain text. Also the deterministic renderer of the screen
-/// snapshot tests. Not a substitute for tanki-render.
+/// Deterministic test renderer for screen snapshots. Production always uses
+/// `AnkiRenderer`; this fake isolates TUI tests from renderer layout changes.
+#[cfg(test)]
 pub struct PlainTextRenderer;
 
+#[cfg(test)]
 impl CardRenderer for PlainTextRenderer {
     fn render(&self, side: &CardSide, options: &RenderOptions) -> RenderedCard {
         plain::render(&side.html, options)
@@ -78,8 +79,14 @@ pub fn to_ratatui_style(style: &Style) -> ratatui::style::Style {
 }
 
 /// Paints renderer lines (used by the plain renderer).
+#[cfg(test)]
 pub fn paint_lines(lines: &[Line], scroll: usize, area: Rect, buf: &mut Buffer) {
-    for (row, line) in lines.iter().skip(scroll).take(area.height as usize).enumerate() {
+    for (row, line) in lines
+        .iter()
+        .skip(scroll)
+        .take(area.height as usize)
+        .enumerate()
+    {
         let y = area.y + row as u16;
         let mut x = area.x;
         for span in &line.spans {
@@ -93,6 +100,7 @@ pub fn paint_lines(lines: &[Line], scroll: usize, area: Rect, buf: &mut Buffer) 
     }
 }
 
+#[cfg(test)]
 mod plain {
     use super::*;
 
@@ -287,8 +295,11 @@ mod plain {
                     s.push_text(&"─".repeat(options.width.min(40) as usize), None);
                     s.break_line();
                 }
-                ("div" | "p" | "li" | "tr" | "center" | "ul" | "ol" | "table" | "h1" | "h2"
-                | "h3" | "h4" | "blockquote" | "pre", _) => s.block(),
+                (
+                    "div" | "p" | "li" | "tr" | "center" | "ul" | "ol" | "table" | "h1" | "h2"
+                    | "h3" | "h4" | "blockquote" | "pre",
+                    _,
+                ) => s.block(),
                 ("b" | "strong", false) => s.bold += 1,
                 ("b" | "strong", true) => s.bold = s.bold.saturating_sub(1),
                 ("i" | "em", false) => s.italic += 1,
@@ -711,17 +722,6 @@ pub fn system_open(path: &Path) -> std::io::Result<()> {
         .map(|_| ())
 }
 
-/// Runs `f`, turning a panic into `None` without printing it. TEMPORARY:
-/// lets a development build start while another stream's crate is still an
-/// `unimplemented!()` stub. Call before the terminal is set up.
-pub fn stub_ready<T>(f: impl FnOnce() -> T) -> Option<T> {
-    let hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).ok();
-    std::panic::set_hook(hook);
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -832,7 +832,10 @@ mod tests {
             true,
             &BTreeSet::new(),
         );
-        assert_eq!((o.width, o.viewport_rows, o.cell_px), (50, 20, Some((9, 18))));
+        assert_eq!(
+            (o.width, o.viewport_rows, o.cell_px),
+            (50, 20, Some((9, 18)))
+        );
         assert!(o.images && o.hide_audio_buttons && !o.night_mode);
         assert_eq!(o.bg, Some(Rgb(250, 250, 250)));
         let o = display.render_options(
@@ -871,11 +874,5 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tanki-tui-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
-    }
-
-    #[test]
-    fn stub_ready_catches_unimplemented() {
-        assert_eq!(stub_ready(|| 3), Some(3));
-        assert_eq!(stub_ready(|| -> u8 { unimplemented!("stub") }), None);
     }
 }

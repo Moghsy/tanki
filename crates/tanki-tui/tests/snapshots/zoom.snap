@@ -1,0 +1,66 @@
+ Image 1 of 2: image  ·  n/p next/previous · Esc close
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ fixture │ 1 0 0                                        ♪ on │ ▣ kitty │ ? help
+
+Buffer {
+    area: Rect { x: 0, y: 0, width: 80, height: 24 },
+    content: [
+        " Image 1 of 2: image  ·  n/p next/previous · Esc close                          ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        " fixture │ 1 0 0                                        ♪ on │ ▣ kitty │ ? help ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
+        x: 55, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: BOLD,
+        x: 9, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 11, y: 23, fg: LightBlue, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 12, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 13, y: 23, fg: DarkGray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 14, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 15, y: 23, fg: DarkGray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 16, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+    ]
+}

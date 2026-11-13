@@ -37,7 +37,10 @@ fn question_answer_rate_and_finish() {
             "StudyConfig"
         ]
     );
-    assert!(matches!(b.state.borrow().log[2], Command::Queue { limit: 1 }));
+    assert!(matches!(
+        b.state.borrow().log[2],
+        Command::Queue { limit: 1 }
+    ));
     assert_eq!(r.phase(), Phase::Question);
     assert!(has_cue(&fx, CueKind::ShowQuestion));
     assert_eq!(r.side_html().unwrap(), "Q1");
@@ -137,7 +140,11 @@ fn timebox_counts_answers_and_continue_restarts_it() {
 
 #[test]
 fn type_answer_flow_compares_what_was_typed() {
-    let mut c = card(1, "Capital?\n[[type:Back]]", "Capital?<hr id=answer>[[type:Back]]");
+    let mut c = card(
+        1,
+        "Capital?\n[[type:Back]]",
+        "Capital?<hr id=answer>[[type:Back]]",
+    );
     c.rendered.type_answer = Some(TypeAnswer::Input {
         expected: "Paris".into(),
         combining: false,
@@ -217,10 +224,7 @@ fn leech_notice_mentions_suspension() {
     });
     r.show_answer(&b, now);
     let fx = r.answer(&b, Rating::Again, now);
-    assert_eq!(
-        notices(&fx),
-        ["Card was a leech. It has been suspended."]
-    );
+    assert_eq!(notices(&fx), ["Card was a leech. It has been suspended."]);
     b.with(|s| {
         s.next_outcome = AnswerOutcome {
             leech: true,
@@ -420,7 +424,10 @@ fn audio_cues_carry_tags_and_settings() {
     assert!(has_cue(&r.replay(), CueKind::Replay(Side::Question)));
     r.show_answer(&b, now);
     assert!(has_cue(&r.replay(), CueKind::Replay(Side::Answer)));
-    assert_eq!(r.tag(Side::Question, 0), Some(MediaTag::Sound("q.mp3".into())));
+    assert_eq!(
+        r.tag(Side::Question, 0),
+        Some(MediaTag::Sound("q.mp3".into()))
+    );
     assert_eq!(r.tag(Side::Answer, 3), None);
 }
 
@@ -432,7 +439,10 @@ fn card_actions_send_commands_and_refresh() {
     r.show_answer(&b, now);
     b.clear_log();
     r.toggle_flag(&b, 3, now);
-    assert!(matches!(b.state.borrow().log[0], Command::SetFlag { flag: 3, .. }));
+    assert!(matches!(
+        b.state.borrow().log[0],
+        Command::SetFlag { flag: 3, .. }
+    ));
     assert_eq!(b.names()[1], "Queue");
     // Same card stays on its answer side with the new flag.
     assert_eq!(r.phase(), Phase::Answer);
@@ -483,10 +493,27 @@ fn other_card_actions() {
         };
         let first = b.state.borrow().log[0].clone();
         let ok = match action {
-            "bury_card" => matches!(first, Command::BuryOrSuspend { target: Target::Cards(ref c), mode: tanki_core::BuryMode::Bury } if c == &[1]),
-            "bury_note" => matches!(first, Command::BuryOrSuspend { target: Target::Notes(ref n), mode: tanki_core::BuryMode::Bury } if n == &[10]),
-            "suspend_card" => matches!(first, Command::BuryOrSuspend { target: Target::Cards(_), mode: tanki_core::BuryMode::Suspend }),
-            "forget" => matches!(first, Command::Forget { restore_position: true, reset_counts: false, .. }),
+            "bury_card" => {
+                matches!(first, Command::BuryOrSuspend { target: Target::Cards(ref c), mode: tanki_core::BuryMode::Bury } if c == &[1])
+            }
+            "bury_note" => {
+                matches!(first, Command::BuryOrSuspend { target: Target::Notes(ref n), mode: tanki_core::BuryMode::Bury } if n == &[10])
+            }
+            "suspend_card" => matches!(
+                first,
+                Command::BuryOrSuspend {
+                    target: Target::Cards(_),
+                    mode: tanki_core::BuryMode::Suspend
+                }
+            ),
+            "forget" => matches!(
+                first,
+                Command::Forget {
+                    restore_position: true,
+                    reset_counts: false,
+                    ..
+                }
+            ),
             _ => matches!(first, Command::DeleteNotes { ref note_ids } if note_ids == &[10]),
         };
         assert!(ok, "{action}: {first:?}");
@@ -569,21 +596,22 @@ fn custom_scheduling_warns_once_and_scheduler_check_offers_upgrade() {
 }
 
 #[test]
-fn missing_core_commands_fall_back_quietly() {
+fn study_config_and_scheduler_failures_block_study() {
     let b = FakeBackend::new(vec![card(1, "Q", "A")]);
     for name in ["StudyConfig", "SchedTiming", "SchedulerStatus"] {
-        b.fail(name, CoreError::Invalid(format!("Not implemented yet: {name}")));
+        b.fail(
+            name,
+            CoreError::Invalid(format!("Not implemented yet: {name}")),
+        );
     }
     let (r, fx) = started(&b, t0());
-    assert!(!fx.iter().any(|e| matches!(e, Effect::Error(_))));
-    assert!(r.card().unwrap().config.show_intervals);
-    // Another error is reported once.
+    assert!(fx.iter().any(|e| matches!(e, Effect::Error(_))));
+    assert!(r.card().is_none());
     let b = FakeBackend::new(vec![card(1, "Q", "A")]);
     b.fail("StudyConfig", CoreError::Other("bad preset".into()));
-    let (_, fx) = started(&b, t0());
-    assert!(fx.contains(&Effect::Error(
-        "Using default study settings: bad preset".into()
-    )));
+    let (r, fx) = started(&b, t0());
+    assert!(r.card().is_none());
+    assert!(fx.contains(&Effect::Error("bad preset".into())));
 }
 
 #[test]

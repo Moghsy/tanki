@@ -4,7 +4,11 @@
 /// `None` when it does not match. Higher is better: consecutive characters,
 /// word starts and an early first match score more.
 pub fn score(query: &str, candidate: &str) -> Option<i64> {
-    let query: Vec<char> = query.to_lowercase().chars().filter(|c| !c.is_whitespace()).collect();
+    let query: Vec<char> = query
+        .to_lowercase()
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
     if query.is_empty() {
         return Some(0);
     }
@@ -59,7 +63,12 @@ mod tests {
         assert!(score("bc", "Bury card").is_some());
         assert!(score("xyz", "Bury card").is_none());
         assert_eq!(score("", "anything"), Some(0));
-        let items = ["Suspend card", "Bury card", "Set due date...", "Toggle auto advance"];
+        let items = [
+            "Suspend card",
+            "Bury card",
+            "Set due date...",
+            "Toggle auto advance",
+        ];
         assert_eq!(rank("bury", items)[0], 1);
         assert_eq!(rank("sdd", items)[0], 2);
         assert_eq!(rank("auto", items), [3]);

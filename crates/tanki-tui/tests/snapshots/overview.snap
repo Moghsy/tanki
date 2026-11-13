@@ -1,0 +1,80 @@
+
+                                    Default
+
+  Fixture deck
+
+                            New:        2 +1
+                            Learning:   1
+                            To Review:  3
+
+                                Study Now   Enter
+
+                               Esc Decks   ? Help
+
+
+
+
+
+
+
+
+
+
+
+ fixture │ 7 1 15                                        ♪ on │ ▣ text │ ? help
+
+Buffer {
+    area: Rect { x: 0, y: 0, width: 80, height: 24 },
+    content: [
+        "                                                                                ",
+        "                                    Default                                     ",
+        "                                                                                ",
+        "  Fixture deck                                                                  ",
+        "                                                                                ",
+        "                            New:        2 +1                                    ",
+        "                            Learning:   1                                       ",
+        "                            To Review:  3                                       ",
+        "                                                                                ",
+        "                                Study Now   Enter                               ",
+        "                                                                                ",
+        "                               Esc Decks   ? Help                               ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        " fixture │ 7 1 15                                        ♪ on │ ▣ text │ ? help ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 36, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 43, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 40, y: 5, fg: LightBlue, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 41, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 42, y: 5, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 44, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 40, y: 6, fg: LightRed, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 41, y: 6, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 40, y: 7, fg: LightGreen, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 41, y: 7, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 31, y: 9, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
+        x: 42, y: 9, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 49, y: 9, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 31, y: 11, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 49, y: 11, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: BOLD,
+        x: 9, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 11, y: 23, fg: LightBlue, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 12, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 13, y: 23, fg: LightRed, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 14, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 15, y: 23, fg: LightGreen, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 17, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+    ]
+}

@@ -117,9 +117,6 @@ mod tests {
         assert!(input.handle_key(&KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)));
         assert_eq!(input.text(), "日a o");
         assert!(!input.handle_key(&key(KeyCode::Enter)));
-        assert!(!input.handle_key(&KeyEvent::new(
-            KeyCode::Char('z'),
-            KeyModifiers::CONTROL
-        )));
+        assert!(!input.handle_key(&KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL)));
     }
 }

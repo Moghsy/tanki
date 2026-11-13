@@ -1,0 +1,69 @@
+
+  Congratulations! You have finished this deck for now.
+
+  The next learning card will be ready in 5 minutes. There are 2 learning
+  cards due later today.
+
+  One or more cards were buried, and will be shown tomorrow. You can unbury
+  them (u) if you wish to see them immediately.
+
+  Enter deck list · u unbury · r refresh · ? help
+
+
+
+
+
+
+
+
+
+
+
+
+
+ fixture │ 7 1 15                                        ♪ on │ ▣ text │ ? help
+
+Buffer {
+    area: Rect { x: 0, y: 0, width: 80, height: 24 },
+    content: [
+        "                                                                                ",
+        "  Congratulations! You have finished this deck for now.                         ",
+        "                                                                                ",
+        "  The next learning card will be ready in 5 minutes. There are 2 learning       ",
+        "  cards due later today.                                                        ",
+        "                                                                                ",
+        "  One or more cards were buried, and will be shown tomorrow. You can unbury     ",
+        "  them (u) if you wish to see them immediately.                                 ",
+        "                                                                                ",
+        "  Enter deck list · u unbury · r refresh · ? help                               ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        " fixture │ 7 1 15                                        ♪ on │ ▣ text │ ? help ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 2, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 55, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 2, y: 9, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 49, y: 9, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: BOLD,
+        x: 9, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 11, y: 23, fg: LightBlue, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 12, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 13, y: 23, fg: LightRed, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 14, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 15, y: 23, fg: LightGreen, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 17, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+    ]
+}

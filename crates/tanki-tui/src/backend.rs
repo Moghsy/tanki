@@ -2,9 +2,9 @@
 //! (`CollectionActor` in production, a fake in tests) plus typed helpers.
 use std::cell::Cell;
 use tanki_core::{
-    AnswerAction, AnswerOutcome, CollectionActor, Command, Congrats, CoreError, Deck,
-    DeckOverview, OpChanges, Queue, QuestionAction, Rating, RenderedCard, Response, SchedTiming,
-    SchedulerStatus, StudyConfig,
+    AnswerAction, AnswerOutcome, CollectionActor, Command, Congrats, CoreError, Deck, DeckOverview,
+    OpChanges, QuestionAction, Queue, Rating, RenderedCard, Response, SchedTiming, SchedulerStatus,
+    StudyConfig,
 };
 
 pub type Result<T> = tanki_core::Result<T>;
@@ -274,7 +274,9 @@ mod tests {
         let root = deck(0, "", vec![deck(1, "Default", vec![]), parent.clone()]);
         let rows = visible_rows(&root);
         assert_eq!(
-            rows.iter().map(|r| r.full_name.as_str()).collect::<Vec<_>>(),
+            rows.iter()
+                .map(|r| r.full_name.as_str())
+                .collect::<Vec<_>>(),
             ["Default", "Lang", "Lang::Japanese"]
         );
         assert_eq!(rows[2].depth, 1);

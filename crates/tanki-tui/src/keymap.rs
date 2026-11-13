@@ -261,7 +261,9 @@ impl fmt::Display for Chord {
         }
         match self.code {
             KeyCode::Char(' ') => f.write_str("Space"),
-            KeyCode::Char(c) if (self.shift || self.ctrl || self.alt) && c.is_ascii_alphabetic() => {
+            KeyCode::Char(c)
+                if (self.shift || self.ctrl || self.alt) && c.is_ascii_alphabetic() =>
+            {
                 write!(f, "{}", c.to_ascii_uppercase())
             }
             KeyCode::Char(c) => write!(f, "{c}"),
@@ -298,6 +300,7 @@ pub const DEFAULTS: &[(&str, &str, &str)] = &[
     ("global", "ctrl+c", "quit"),
     ("global", "?", "help"),
     ("global", "f1", "help"),
+    ("global", "f2", "about"),
     ("global", ":", "palette"),
     ("global", "ctrl+k", "palette"),
     ("global", "d", "deck-list"),
@@ -503,7 +506,11 @@ impl Keymap {
     /// (action, keys) for the help overlay: actions bound in `scope` whose
     /// keys are not shadowed by an earlier scope in `active`.
     pub fn help_rows(&self, scope: Scope, active: &[Scope]) -> Vec<(Action, Vec<Chord>)> {
-        let earlier: Vec<Scope> = active.iter().take_while(|s| **s != scope).copied().collect();
+        let earlier: Vec<Scope> = active
+            .iter()
+            .take_while(|s| **s != scope)
+            .copied()
+            .collect();
         let mut rows: Vec<(Action, Vec<Chord>)> = Vec::new();
         for b in self.bindings.iter().filter(|b| b.scope == scope) {
             if self.lookup(&earlier, &b.chord).is_some() {
@@ -551,7 +558,10 @@ mod tests {
         // Kitty reports Ctrl+Shift+Z as `Z` or `z` with both modifiers.
         let redo = Chord::parse("ctrl+shift+z").unwrap();
         for c in ['z', 'Z'] {
-            let e = ev(KeyCode::Char(c), KeyModifiers::CONTROL | KeyModifiers::SHIFT);
+            let e = ev(
+                KeyCode::Char(c),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            );
             assert_eq!(Chord::from_event(&e).unwrap(), redo);
         }
         let mut release = ev(KeyCode::Char('a'), KeyModifiers::NONE);
@@ -585,20 +595,41 @@ mod tests {
     fn screen_scope_wins_over_global() {
         let km = Keymap::default();
         let s = Chord::parse("s").unwrap();
-        assert_eq!(km.lookup(&[Scope::Decks, Scope::Global], &s), Some(Action::StudyDeck));
-        assert_eq!(km.lookup(&[Scope::Overview, Scope::Global], &s), Some(Action::StudyNow));
-        assert_eq!(km.lookup(&[Scope::Review, Scope::Global], &s), Some(Action::Study));
+        assert_eq!(
+            km.lookup(&[Scope::Decks, Scope::Global], &s),
+            Some(Action::StudyDeck)
+        );
+        assert_eq!(
+            km.lookup(&[Scope::Overview, Scope::Global], &s),
+            Some(Action::StudyNow)
+        );
+        assert_eq!(
+            km.lookup(&[Scope::Review, Scope::Global], &s),
+            Some(Action::Study)
+        );
         let u = Chord::parse("u").unwrap();
-        assert_eq!(km.lookup(&[Scope::Review, Scope::Global], &u), Some(Action::Undo));
-        assert_eq!(km.lookup(&[Scope::Overview, Scope::Global], &u), Some(Action::Unbury));
+        assert_eq!(
+            km.lookup(&[Scope::Review, Scope::Global], &u),
+            Some(Action::Undo)
+        );
+        assert_eq!(
+            km.lookup(&[Scope::Overview, Scope::Global], &u),
+            Some(Action::Unbury)
+        );
         assert_eq!(km.lookup(&[Scope::Decks, Scope::Global], &u), None);
         let one = Chord::parse("1").unwrap();
-        assert_eq!(km.lookup(&[Scope::Review, Scope::Global], &one), Some(Action::Again));
+        assert_eq!(
+            km.lookup(&[Scope::Review, Scope::Global], &one),
+            Some(Action::Again)
+        );
         assert_eq!(km.lookup(&[Scope::Decks, Scope::Global], &one), None);
         let flag = Chord::parse("ctrl+3").unwrap();
         assert_eq!(km.lookup(&[Scope::Review], &flag), Some(Action::Flag(3)));
         let esc = Chord::parse("esc").unwrap();
-        assert_eq!(km.lookup(&[Scope::Zoom, Scope::Global], &esc), Some(Action::Back));
+        assert_eq!(
+            km.lookup(&[Scope::Zoom, Scope::Global], &esc),
+            Some(Action::Back)
+        );
     }
 
     #[test]

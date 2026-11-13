@@ -1,12 +1,15 @@
 //! tanki-tui: the full-screen study interface (PLAN 7, 11 Phase 1): deck
 //! list, overview, reviewer, congrats and image zoom, over
 //! `tanki_core::CollectionActor`.
+pub mod app;
 pub mod backend;
 pub mod fuzzy;
 pub mod input;
 pub mod keymap;
 pub mod reviewer;
 pub mod services;
+pub mod terminal;
+mod ui;
 
 #[cfg(test)]
 mod testing;
