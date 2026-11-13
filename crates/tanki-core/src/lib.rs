@@ -1,12 +1,14 @@
 //! Collection actor, study commands and adapters to the pinned Anki core.
 
 mod actor;
+mod data;
 mod fixture;
 mod safety;
 mod study;
 mod sync;
 mod types;
 pub use actor::CollectionActor;
+pub use data::*;
 pub use safety::validate_profile;
 pub use sync::SyncEndpoint;
 pub use types::*;

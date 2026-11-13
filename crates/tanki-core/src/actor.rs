@@ -235,6 +235,11 @@ fn execute(
     queued: &mut study::StateCache,
 ) -> Result<Response> {
     Ok(match command {
+        Command::Data(_) => {
+            return Err(CoreError::Invalid(
+                "Data operations are not integrated yet".into(),
+            ))
+        }
         Command::DeckTree => Response::DeckTree(deck(study::deck_tree(col)?)),
         Command::Queue { limit } => Response::Queue(study::queue(col, limit, queued)?),
         Command::Answer {

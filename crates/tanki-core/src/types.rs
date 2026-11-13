@@ -300,13 +300,18 @@ pub struct UndoStatus {
 /// cached scheduling states: fetch a fresh `Queue` before the next `Answer`.
 #[derive(Debug, Clone)]
 pub enum Command {
+    Data(crate::DataCommand),
     /// -> `DeckTree` (with counts; rolls the day over if needed).
     DeckTree,
     /// Cards of the current deck -> `Queue`. Idempotent; caches each card's
     /// scheduling states (with `custom_data` copied in) for `Answer`.
-    Queue { limit: u32 },
+    Queue {
+        limit: u32,
+    },
     /// -> `Rendered`.
-    Render { card_id: i64 },
+    Render {
+        card_id: i64,
+    },
     /// Answers a card from the last `Queue` -> `Answered`.
     Answer {
         card_id: i64,
@@ -327,7 +332,9 @@ pub enum Command {
         fields: Vec<String>,
     },
     /// -> `CardIds`.
-    Search { query: String },
+    Search {
+        query: String,
+    },
     /// Forced backup; closes and reopens the collection -> `Backup`.
     Backup,
     /// -> `CardIds` (all cards).
@@ -340,11 +347,16 @@ pub enum Command {
 
     // Decks, overview, congrats.
     /// Makes `deck_id` the current deck -> `Overview`.
-    SelectDeck { deck_id: i64 },
+    SelectDeck {
+        deck_id: i64,
+    },
     /// The current deck -> `Overview`.
     Overview,
     /// -> `Changes`.
-    SetDeckCollapsed { deck_id: i64, collapsed: bool },
+    SetDeckCollapsed {
+        deck_id: i64,
+        collapsed: bool,
+    },
     /// The current deck -> `Congrats`.
     Congrats,
     /// Localised "Studied N cards in M minutes today." -> `Text`.
@@ -359,7 +371,9 @@ pub enum Command {
 
     // Reviewer.
     /// -> `StudyConfig`.
-    StudyConfig { card_id: i64 },
+    StudyConfig {
+        card_id: i64,
+    },
     /// `CompareAnswer` -> `Html` (the `<code id=typeans>` diff).
     CompareAnswer {
         expected: String,
@@ -367,13 +381,25 @@ pub enum Command {
         combining: bool,
     },
     /// Flag 0 clears -> `Changes`.
-    SetFlag { card_ids: Vec<i64>, flag: u8 },
+    SetFlag {
+        card_ids: Vec<i64>,
+        flag: u8,
+    },
     /// Adds or removes the `marked` tag -> `Changes`.
-    SetMarked { note_ids: Vec<i64>, marked: bool },
+    SetMarked {
+        note_ids: Vec<i64>,
+        marked: bool,
+    },
     /// -> `Changes`.
-    BuryOrSuspend { target: Target, mode: BuryMode },
+    BuryOrSuspend {
+        target: Target,
+        mode: BuryMode,
+    },
     /// -> `Changes`.
-    Unbury { deck_id: i64, mode: UnburyMode },
+    Unbury {
+        deck_id: i64,
+        mode: UnburyMode,
+    },
     /// Reviewer defaults for the forget dialog -> `ForgetDefaults`.
     ForgetDefaults,
     /// Reset to new -> `Changes`.
@@ -384,12 +410,18 @@ pub enum Command {
     },
     /// `days` uses Anki's syntax (`N`, `N-M`, `N!`); remembered as the
     /// reviewer default -> `Changes`.
-    SetDueDate { card_ids: Vec<i64>, days: String },
+    SetDueDate {
+        card_ids: Vec<i64>,
+        days: String,
+    },
     /// -> `Changes`.
-    DeleteNotes { note_ids: Vec<i64> },
+    DeleteNotes {
+        note_ids: Vec<i64>,
+    },
 }
 #[derive(Debug, Clone)]
 pub enum Response {
+    Data(crate::DataResponse),
     DeckTree(Deck),
     Queue(Queue),
     Rendered(RenderedCard),
