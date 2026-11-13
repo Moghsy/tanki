@@ -61,53 +61,29 @@ impl Capabilities {
     }
 }
 
-/// Queries the terminal once (raw mode, DA1 sentinel). Call before any event
-/// reader starts. When stdin/stdout are not terminals, returns defaults with
-/// `graphics` = the override or `None`.
+mod images;
+pub use images::Images;
+
+/// Queries the terminal once (raw mode, DA1 sentinel, one second timeout).
+/// Call before any event reader starts. Raw mode is left as it was found.
+/// When stdin/stdout are not terminals nothing is written and the result is
+/// defaults with `graphics` = the override or `None`.
 pub fn probe(requested: GraphicsMode) -> io::Result<Capabilities> {
-    let _ = requested;
-    unimplemented!("terminal stream")
+    Ok(probe_raw(requested)?
+        .map(|(p, _raw)| p.caps)
+        .unwrap_or_else(|| offline(requested)))
 }
 
-/// Image display for the TUI through ratatui-image: kitty Unicode
-/// placeholders, iTerm2, Sixel and half-blocks (PLAN 5.1, 5.2).
-pub struct Images {
-    _private: (),
-}
-
-impl Images {
-    pub fn new(capabilities: &Capabilities) -> Self {
-        let _ = capabilities;
-        unimplemented!("terminal stream")
-    }
-    pub fn mode(&self) -> GraphicsMode {
-        unimplemented!("terminal stream")
-    }
-    /// Switches protocol live; drops cached encodings.
-    pub fn set_mode(&mut self, mode: GraphicsMode) {
-        let _ = mode;
-        unimplemented!("terminal stream")
-    }
-    /// Next mode in the order Kitty, Iterm, Sixel, Blocks, None; returns it.
-    pub fn cycle(&mut self) -> GraphicsMode {
-        unimplemented!("terminal stream")
-    }
-    /// Draws `image` scaled to fit `area` (aspect kept). `key` identifies the
-    /// image so the encoded form is reused across frames while the key,
-    /// area size and mode stay the same. `GraphicsMode::None` draws nothing.
-    pub fn render(
-        &mut self,
-        key: u64,
-        image: &image::DynamicImage,
-        area: ratatui::layout::Rect,
-        buf: &mut ratatui::buffer::Buffer,
-    ) {
-        let _ = (key, image, area, buf);
-        unimplemented!("terminal stream")
-    }
-    /// Forgets all encoded images and placements (call on screen change).
-    pub fn clear(&mut self) {
-        unimplemented!("terminal stream")
+fn offline(requested: GraphicsMode) -> Capabilities {
+    let graphics = if requested == GraphicsMode::Auto {
+        GraphicsMode::None
+    } else {
+        requested
+    };
+    Capabilities {
+        graphics,
+        detected: GraphicsMode::None,
+        ..Capabilities::default()
     }
 }
 
@@ -121,7 +97,7 @@ pub struct SystemTerminalDoctor;
 // A query is not an image placement. DA1 terminates the batch; unsupported replies
 // are left unknown, rather than inferred from terminal environment variables.
 const KITTY_QUERY: &str = "\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\";
-const QUERY: &str = "\x1b[>0q\x1b[16t\x1b[14t\x1b[?u\x1b]11;?\x1b\\\x1b[?2026$p\x1b[?2031$p\x1b[?5522$p\x1b[?1016$p\x1b[c";
+const QUERY: &str = "\x1b[>0q\x1b[16t\x1b[14t\x1b[?u\x1b]10;?\x1b\\\x1b]11;?\x1b\\\x1b[?2026$p\x1b[?2031$p\x1b[?5522$p\x1b[?1016$p\x1b[c";
 const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAIAAADZF8uwAAAAIUlEQVR4nGP4YGQEQXILPkAQpggD9RThkYOLUFHRsPYdANPx2JGDc6mSAAAAAElFTkSuQmCC";
 
 #[derive(Default)]
@@ -183,6 +159,7 @@ struct Replies {
     area: Option<String>,
     keyboard: Option<String>,
     background: Option<String>,
+    foreground: Option<String>,
     modes: [Option<String>; 4],
     sentinel: bool,
 }
@@ -241,18 +218,92 @@ fn parse(data: &[u8]) -> Replies {
             }
         }
     }
-    if let Some(rest) = s.split("\x1b]11;").nth(1) {
-        if let Some(end) = rest.find('\x07').or_else(|| rest.find("\x1b\\")) {
-            c.background = Some(
-                rest[..end]
-                    .chars()
-                    .filter(|c| !c.is_control())
-                    .take(256)
-                    .collect(),
-            );
-        }
-    }
+    c.background = osc_reply(&s, "11");
+    c.foreground = osc_reply(&s, "10");
     c
+}
+
+/// Body of an OSC `code` reply (`ESC ] code ; body BEL|ST`); `None` when the
+/// terminator has not arrived.
+fn osc_reply(s: &str, code: &str) -> Option<String> {
+    let rest = s.split(&format!("\x1b]{code};")).nth(1)?;
+    let end = match (rest.find('\x07'), rest.find("\x1b\\")) {
+        (Some(a), Some(b)) => a.min(b),
+        (a, b) => a.or(b)?,
+    };
+    Some(
+        rest[..end]
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(256)
+            .collect(),
+    )
+}
+
+/// Parses `rgb:r/g/b` with 1 to 4 hex digits per channel into 8-bit values.
+fn parse_color(s: &str) -> Option<(u8, u8, u8)> {
+    let mut parts = s.strip_prefix("rgb:")?.split('/');
+    let mut channel = || {
+        let p = parts.next()?;
+        if p.is_empty() || p.len() > 4 || !p.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        let v = u32::from_str_radix(p, 16).ok()?;
+        let max = (1u32 << (4 * p.len())) - 1;
+        Some(((v * 255 + max / 2) / max) as u8)
+    };
+    let (r, g, b) = (channel()?, channel()?, channel()?);
+    parts.next().is_none().then_some((r, g, b))
+}
+
+fn capabilities(requested: GraphicsMode, c: &Replies, hints: &Hints) -> Capabilities {
+    let detected = select(GraphicsMode::Auto, c);
+    let cell_px = c.cell.as_deref().and_then(|v| {
+        let (h, w) = v.split_once(';')?;
+        let (h, w) = (h.parse::<u16>().ok()?, w.parse::<u16>().ok()?);
+        (h > 0 && w > 0).then_some((w, h))
+    });
+    Capabilities {
+        graphics: select(requested, c),
+        detected,
+        cell_px,
+        background: c.background.as_deref().and_then(parse_color),
+        foreground: c.foreground.as_deref().and_then(parse_color),
+        keyboard_enhancement: c.keyboard.is_some(),
+        synchronized_output: matches!(c.modes[0].as_deref(), Some("1" | "2" | "3")),
+        version: c.version.clone().filter(|v| !v.is_empty()),
+        tmux: !hints.tmux.is_empty(),
+    }
+}
+
+struct Probed {
+    replies: Replies,
+    caps: Capabilities,
+    hints: Hints,
+}
+
+/// Runs the query in raw mode. Returns `None` when not on a terminal. The
+/// returned guard restores the raw-mode state it found when dropped.
+fn probe_raw(requested: GraphicsMode) -> io::Result<Option<(Probed, RawMode)>> {
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        return Ok(None);
+    }
+    let hints = Hints::from_env();
+    let raw = RawMode::enter()?;
+    let mut out = io::stdout().lock();
+    out.write_all(query(&hints).as_bytes())?;
+    out.flush()?;
+    drop(out);
+    let replies = parse(&read_replies()?);
+    let caps = capabilities(requested, &replies, &hints);
+    Ok(Some((
+        Probed {
+            replies,
+            caps,
+            hints,
+        },
+        raw,
+    )))
 }
 
 fn select(requested: GraphicsMode, c: &Replies) -> GraphicsMode {
@@ -278,16 +329,24 @@ fn summary(c: &Replies, mode: GraphicsMode, hints: &Hints) -> String {
         display_value(&c.modes[0]), display_value(&c.modes[1]), display_value(&c.modes[2]), display_value(&c.modes[3]), if c.sentinel { "received" } else { "timed out" }, hints.term, hints.program, hints.tmux, hints.herdr)
 }
 
-struct RawMode;
+/// Enables raw mode and restores the state it found (already raw: stays raw).
+struct RawMode {
+    was_raw: bool,
+}
 impl RawMode {
     fn enter() -> io::Result<Self> {
-        crossterm::terminal::enable_raw_mode()?;
-        Ok(Self)
+        let was_raw = crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
+        if !was_raw {
+            crossterm::terminal::enable_raw_mode()?;
+        }
+        Ok(Self { was_raw })
     }
 }
 impl Drop for RawMode {
     fn drop(&mut self) {
-        let _ = crossterm::terminal::disable_raw_mode();
+        if !self.was_raw {
+            let _ = crossterm::terminal::disable_raw_mode();
+        }
     }
 }
 
@@ -354,24 +413,19 @@ fn image(mode: GraphicsMode, tmux: bool) -> String {
 
 impl TerminalDoctor for SystemTerminalDoctor {
     fn run(&mut self, options: &DoctorOptions) -> io::Result<DoctorReport> {
-        if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        let Some((p, raw)) = probe_raw(options.graphics)? else {
             return Ok(DoctorReport { summary: "Terminal probe skipped: stdin and stdout must both be terminals; no image displayed.".into() });
-        }
-        let hints = Hints::from_env();
-        let raw = RawMode::enter()?;
-        let mut out = io::stdout().lock();
-        out.write_all(query(&hints).as_bytes())?;
-        out.flush()?;
-        let capabilities = parse(&read_replies()?);
-        let mode = select(options.graphics, &capabilities);
+        };
+        let mode = p.caps.graphics;
         if options.show_image {
+            let mut out = io::stdout().lock();
             out.write_all(format!("Test image ({mode:?}):\r\n").as_bytes())?;
-            out.write_all(image(mode, !hints.tmux.is_empty()).as_bytes())?;
+            out.write_all(image(mode, p.caps.tmux).as_bytes())?;
             out.flush()?;
         }
         drop(raw);
         Ok(DoctorReport {
-            summary: summary(&capabilities, mode, &hints),
+            summary: summary(&p.replies, mode, &p.hints),
         })
     }
 }
@@ -433,6 +487,86 @@ mod tests {
         assert!(query(&Hints::default()).starts_with(KITTY_QUERY));
         assert!(image(GraphicsMode::Kitty, true).starts_with("\x1bPtmux;\x1b\x1b_G"));
         assert!(image(GraphicsMode::Kitty, true).contains("q=2;"));
+    }
+    #[test]
+    fn parses_osc_colours() {
+        assert_eq!(parse_color("rgb:ffff/0000/8000"), Some((255, 0, 128)));
+        assert_eq!(parse_color("rgb:ff/00/80"), Some((255, 0, 128)));
+        assert_eq!(parse_color("rgb:f/0/8"), Some((255, 0, 136)));
+        assert_eq!(parse_color("rgb:fff/000/800"), Some((255, 0, 128)));
+        for bad in [
+            "",
+            "rgb:",
+            "rgb:ff/00",
+            "rgb:ff/00/80/11",
+            "rgb:gg/00/00",
+            "rgb:fffff/0/0",
+            "#ff0000",
+            "rgb:/0/0",
+        ] {
+            assert_eq!(parse_color(bad), None, "{bad}");
+        }
+    }
+    #[test]
+    fn parses_osc_10_and_11_with_both_terminators() {
+        let c = parse(b"\x1b]10;rgb:cccc/cccc/cccc\x07\x1b]11;rgb:1111/2222/3333\x1b\\");
+        assert_eq!(c.foreground.as_deref(), Some("rgb:cccc/cccc/cccc"));
+        assert_eq!(c.background.as_deref(), Some("rgb:1111/2222/3333"));
+        // partial (no terminator yet) and garbage
+        assert_eq!(parse(b"\x1b]11;rgb:1111/22").background, None);
+        assert_eq!(parse(b"\x1b]10;").foreground, None);
+        let g = parse(b"\xff\xfe\x1b]\x1b[;;c garbage \x1b]11;\x07");
+        assert_eq!(g.background.as_deref(), Some(""));
+        assert!(parse_color(g.background.as_deref().unwrap()).is_none());
+        assert!(query(&Hints::default()).contains("\x1b]10;?"));
+    }
+    #[test]
+    fn builds_capabilities() {
+        let r = parse(b"\x1b_Gi=31;OK\x1b\\\x1bP>|ghostty 1.2\x1b\\\x1b[6;20;10t\x1b[?0u\x1b]10;rgb:ffff/ffff/ffff\x07\x1b]11;rgb:0000/0000/0000\x07\x1b[?2026;2$y\x1b[?1;4c");
+        let hints = Hints {
+            tmux: "/tmp/tmux-1/default,1,0".into(),
+            ..Hints::default()
+        };
+        let c = capabilities(GraphicsMode::Auto, &r, &hints);
+        assert_eq!(
+            (c.graphics, c.detected),
+            (GraphicsMode::Kitty, GraphicsMode::Kitty)
+        );
+        assert_eq!(c.cell_px, Some((10, 20)));
+        assert_eq!(c.background, Some((0, 0, 0)));
+        assert_eq!(c.foreground, Some((255, 255, 255)));
+        assert_eq!(c.dark(), Some(true));
+        assert!(c.keyboard_enhancement && c.synchronized_output && c.tmux);
+        assert_eq!(c.version.as_deref(), Some("ghostty 1.2"));
+        let c = capabilities(GraphicsMode::Iterm, &r, &Hints::default());
+        assert_eq!(
+            (c.graphics, c.detected),
+            (GraphicsMode::Iterm, GraphicsMode::Kitty)
+        );
+        // sixel via DA1 only; nothing answered at all means blocks and unknowns
+        let c = capabilities(GraphicsMode::Auto, &parse(b"\x1b[?1;4c"), &Hints::default());
+        assert_eq!(c.detected, GraphicsMode::Sixel);
+        let c = capabilities(GraphicsMode::Auto, &parse(b""), &Hints::default());
+        assert_eq!(
+            (c.detected, c.cell_px, c.dark(), c.synchronized_output),
+            (GraphicsMode::Blocks, None, None, false)
+        );
+        let light = Capabilities {
+            background: Some((250, 250, 250)),
+            ..Capabilities::default()
+        };
+        assert_eq!(light.dark(), Some(false));
+    }
+    #[test]
+    fn offline_defaults() {
+        assert_eq!(offline(GraphicsMode::Auto).graphics, GraphicsMode::None);
+        assert_eq!(offline(GraphicsMode::Sixel).graphics, GraphicsMode::Sixel);
+        if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+            assert_eq!(
+                probe(GraphicsMode::Auto).unwrap(),
+                offline(GraphicsMode::Auto)
+            );
+        }
     }
     #[test]
     fn non_tty_skips() {
