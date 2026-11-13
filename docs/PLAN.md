@@ -615,7 +615,7 @@ Tasks, in order (mostly sequential; little to parallelise):
 - [ ] Spike B — golden render harness: script that renders every fixture card with Anki's Python package at the pinned version and stores question/answer HTML plus audio-tag lists; a Rust test compares tanki-core's pipeline (6.0). Settle `partial_render`.
 - [ ] Spike C — schema edges: open a schema-11 fixture (upgrade path and pre-upgrade copy); behaviour with a schema newer than supported (simulate by editing a copy's version field).
 - [ ] Spike D — desktop version skew: have the 25.09.4 Python package open and save a fixture collection written by tanki-core (deck config edited, cards answered); diff what changed. Document any dropped fields.
-- [ ] Spike E — `tanki doctor`: capability probe (5.2) and a test image through each protocol. The user runs it in herdr, kitty and Ghostty and reports what displays; the agent cannot see the terminal.
+- [x] Spike E — `tanki doctor`: capability probe (5.2) and a test image through each protocol. The user runs it in herdr, kitty and Ghostty and reports what displays; the agent cannot see the terminal.
 - [ ] Evaluate bumping the pin to the newest stable upstream tag; keep the bump only if everything above still passes.
 - [ ] CI: build, tests, patch-apply check, `cargo deny`/licence check.
 
@@ -764,7 +764,7 @@ Each item names the phase that resolves it. Replace the entry with the result wh
 | Whether `partial_render` must be true to match desktop | R2 vs R3 | Phase 0 spike B |
 | Library behaviour when the collection schema is newer than supported | R5 | Phase 0 spike C |
 | What a 25.09.4 client drops from a collection written by the newer core | this plan | Phase 0 spike D |
-| Image display through herdr, kitty, Ghostty on this machine | R8 | Phase 0 spike E |
+| Image display through herdr, kitty, Ghostty on this machine. **Partial (2026-11-13):** herdr (XTVERSION libghostty, TERM_PROGRAM=herdr) auto-detected Kitty direct placement, 15×34 px cells, Kitty keyboard flags 0, sixel unconfirmed; user confirmed the test image displayed. Plain Ghostty 1.3.0 (TERM=xterm-ghostty, outside herdr): same detection (Kitty direct placement, 15×34 px cells, 3735×1938 px text area, keyboard flags 0, sixel unconfirmed); user confirmed the Kitty-protocol image displayed. Standalone kitty terminal: user confirmed the test image displayed (output not pasted). **Spike E complete for all three terminals.** | R8 | Phase 0 spike E |
 | User installed protoc 31.1; full workspace build and tests pass with it. Distro 3.21 was not tested and is no longer required for this environment. | 4.1 | Phase 0 foundation verified |
 | Anki's server accepts a custom `BUILDHASH` in the client string | 4.3 | Phase 0 spike A |
 | Two different servers on one collection force a full sync | decision 2 | Phase 2 tests |
@@ -779,7 +779,7 @@ Each item names the phase that resolves it. Replace the entry with the result wh
 
 Hard constraints. If a task seems to require breaking one, stop and ask the user.
 
-User-approved Phase 0 exceptions (2026-11-12): Spike C may update only `col.ver` in a generated, closed temporary fixture to test future-schema rejection. No other raw SQL writes are allowed. GPT-6.1 Sol at high effort (complex spikes) or GPT-6.1 Terra at medium effort (mechanical spikes) substitutes for unavailable Opus/Sonnet agents.
+User-approved Phase 0 exceptions (2026-11-12): Spike C may update only `col.ver` in a generated, closed temporary fixture to test future-schema rejection. No other raw SQL writes are allowed. The user also approved Spike A full download on isolated temporary fixtures only, after a completed backup and without competing processes: upstream releases its SQLite lock before replacement. Production full download remains blocked pending a safe locking design. GPT-6.1 Sol at high effort (complex spikes) or GPT-6.1 Terra at medium effort (mechanical spikes) substitutes for unavailable Opus/Sonnet agents.
 
 **Data safety**
 

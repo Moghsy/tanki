@@ -12,7 +12,6 @@ Prerequisites: Rust 1.97.1, a C compiler, and protoc (31.1 recommended). Install
 
 ```sh
 export PROTOC="$HOME/.local/bin/protoc" # or your installed protoc path
-git submodule update --init -- vendor/anki
 cargo xtask setup
 cargo build --workspace
 cargo test --workspace

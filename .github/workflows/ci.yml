@@ -1,0 +1,31 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      PROTOC: /usr/bin/protoc
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal --component clippy,rustfmt
+      - name: Initialize Anki only
+        run: git submodule update --init -- vendor/anki
+      - name: Apply patches idempotently
+        run: |
+          cargo xtask setup
+          cargo xtask setup
+          git -C vendor/anki apply --reverse --check ../../patches/anki/0001-expose-progress.patch
+      - name: Build
+        run: cargo build --workspace --locked
+      - name: Test
+        run: cargo test --workspace --locked
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: License metadata gate
+        run: |
+          python3 scripts/test-license-check.py
+          python3 scripts/check-licenses.py
