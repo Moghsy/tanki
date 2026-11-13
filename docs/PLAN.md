@@ -1,6 +1,6 @@
 # tanki — plan for a terminal Anki client
 
-Status: **Phase 0 complete (2026-11-13), pending the user's review; results are in section 13. The pin moved to the 26.09.4 release tag during Phase 0 (4.1).** Written 2026-11-12 against the Anki checkout at `../anki` (`main` at `4aa9c0836`, 2026-08-30, just past the 26.08.1 tag).
+Status: **Phase 1 in progress (2026-11-13). Phase 0 is complete; shared Phase 1 interfaces are committed and terminal/media streams are integrated. Results are in section 13. The pin moved to the 26.09.4 release tag during Phase 0 (4.1).** Written 2026-11-12 against the Anki checkout at `../anki` (`main` at `4aa9c0836`, 2026-08-30, just past the 26.08.1 tag).
 
 ## 0. How to use this document
 
@@ -629,6 +629,8 @@ Exit test: `cargo test` green including golden renders and the in-process sync t
 Read first: R2 §0–§2, §8–§9; R3 §0–§4, §6–§8; R8 §1–§3, §5; R4 reviewer and deck-browser sections.
 
 Agree first (one short design step): the `tanki-core` command/response types for study; the `tanki-render` input (`CardSide { html, css, body_classes, media_dir }`) and output (`RenderedCard { lines of styled spans, graphics blocks, widgets }`); the `tanki-media` player interface.
+
+- [x] Shared interfaces committed (`5ac8cf9`); contracts and stream ownership are in `docs/implementation/phase-1-interfaces.md`.
 
 Streams (parallel after the interfaces exist):
 

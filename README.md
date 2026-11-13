@@ -8,7 +8,7 @@ tanki is an unofficial, Anki-compatible client. It is not affiliated with or end
 
 Development uses synthetic collections only. Never point development commands at your real Anki profile. See [the implementation plan](docs/PLAN.md).
 
-Prerequisites: Rust 1.97.1, a C compiler, and protoc (31.1 recommended). Install these explicitly; setup does not download executable tools.
+Prerequisites: Rust 1.97.1, a C compiler, protoc (31.1 recommended), and the ALSA development headers plus pkg-config on Linux (`libasound2-dev` and `pkg-config` on Debian/Ubuntu). Install these explicitly; setup does not download executable tools.
 
 ```sh
 export PROTOC="$HOME/.local/bin/protoc" # or your installed protoc path
