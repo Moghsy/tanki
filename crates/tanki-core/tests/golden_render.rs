@@ -104,46 +104,19 @@ fn card_json(card: &RenderedCard) -> Value {
     })
 }
 
-/// Cards whose golden text holds Fluent's Unicode isolation marks (U+2068,
-/// U+2069) around arguments of a localized message. pylib's backend uses
-/// `I18n::new(&["en"])`, which keeps them; the actor's collection is built
-/// without `set_tr`, so it gets `I18n::template_only()`, which turns them off.
-/// The difference sits in `open_collection` (outside this stream); see the
-/// ignored test `known_gap_isolation_marks_in_localized_card_text`. These
-/// cards are compared with the marks removed from the golden text.
-const ISOLATION_MARK_CARDS: &[&str] = &["tanki Broken|0|broken"];
-
-fn without_isolation_marks(value: &Value) -> Value {
-    match value {
-        Value::String(s) => Value::String(s.replace(['\u{2068}', '\u{2069}'], "")),
-        other => other.clone(),
-    }
-}
-
 /// Returns `key: field` for every field that differs from the golden file.
+/// Text is compared exactly, including the Unicode isolation marks (U+2068,
+/// U+2069) Fluent puts around message arguments: the actor opens collections
+/// with real translations, as desktop does, and display code strips the marks.
 fn differences(rendered: &BTreeMap<String, Value>) -> Vec<String> {
-    differences_from(&golden(), rendered, true)
-}
-
-fn differences_from(
-    golden: &BTreeMap<String, Value>,
-    rendered: &BTreeMap<String, Value>,
-    allow_known_gaps: bool,
-) -> Vec<String> {
     let mut out = vec![];
-    for (key, expected) in golden {
+    for (key, expected) in &golden() {
         let actual = &rendered[key];
-        let strip = allow_known_gaps && ISOLATION_MARK_CARDS.contains(&key.as_str());
         for field in FIELDS {
-            let expected = if strip {
-                without_isolation_marks(&expected[field])
-            } else {
-                expected[field].clone()
-            };
-            if actual[field] != expected {
+            if actual[field] != expected[field] {
                 out.push(format!(
-                    "{key}: {field}\n  python: {expected}\n  tanki:  {}",
-                    actual[field]
+                    "{key}: {field}\n  python: {}\n  tanki:  {}",
+                    expected[field], actual[field]
                 ));
             }
         }
@@ -185,26 +158,6 @@ fn renders_match_python_golden() -> Result<()> {
         diffs.len(),
         diffs.join("\n")
     );
-    Ok(())
-}
-
-/// Known gap, kept failing on purpose: desktop's localized card text (template
-/// errors here; also the empty-cloze message and TTS errors) wraps message
-/// arguments in U+2068/U+2069, and tanki's does not, because the actor opens
-/// the collection with `I18n::template_only()`. Closing it needs
-/// `open_collection` in `src/actor.rs` (lead-owned) to call
-/// `set_tr(I18n::new(&[lang]))`, with the marks stripped at display time
-/// (PLAN 4.3). Run with `cargo test -p tanki-core --test golden_render -- --ignored`.
-#[test]
-#[ignore = "known gap: actor builds the collection with I18n::template_only (no isolation marks)"]
-fn known_gap_isolation_marks_in_localized_card_text() -> Result<()> {
-    let rendered = render_through_actor()?;
-    let golden: BTreeMap<String, Value> = golden()
-        .into_iter()
-        .filter(|(key, _)| ISOLATION_MARK_CARDS.contains(&key.as_str()))
-        .collect();
-    let diffs = differences_from(&golden, &rendered, false);
-    assert!(diffs.is_empty(), "{}", diffs.join("\n"));
     Ok(())
 }
 
@@ -340,6 +293,7 @@ fn partial_render_must_be_true() -> Result<()> {
             profile.join("collection.media"),
             profile.join("collection.media.db2"),
         )
+        .set_tr(anki_i18n::I18n::new(&["en"]))
         .build()
         .expect("open fixture");
     let mut run = |partial| -> BTreeMap<String, Value> {

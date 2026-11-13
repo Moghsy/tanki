@@ -145,12 +145,19 @@ impl From<anki::error::AnkiError> for CoreError {
     }
 }
 /// The only place a collection is built, so every reopen uses the same paths.
+///
+/// Real translations are loaded, as desktop does, instead of the builder's
+/// English-only default: localized text inside rendered cards then matches
+/// desktop byte for byte (golden test), including the U+2068/U+2069 isolation
+/// marks around message arguments, which display code strips. The language is
+/// fixed to English until tanki has a config (PLAN 4.5).
 fn open_collection(profile: &Path) -> Result<Collection> {
     Ok(CollectionBuilder::new(profile.join("collection.anki2"))
         .set_media_paths(
             profile.join("collection.media"),
             profile.join("collection.media.db2"),
         )
+        .set_tr(anki_i18n::I18n::new(&["en"]))
         .build()?)
 }
 /// Forces a backup and waits for its thread. Returns whether Anki read the
