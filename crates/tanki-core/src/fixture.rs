@@ -151,7 +151,10 @@ pub(crate) fn populate(col: &mut Collection) -> Result<()> {
         &basic,
         "latex-missing",
         &[
-            ("Front", r"Missing image: [latex]\int_0^1 x\,dx[/latex]".into()),
+            (
+                "Front",
+                r"Missing image: [latex]\int_0^1 x\,dx[/latex]".into(),
+            ),
             ("Back", "[$]a+b[/$] and [$$]c[/$$]".into()),
         ],
     )?;
