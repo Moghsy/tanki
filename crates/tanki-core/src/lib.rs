@@ -2,6 +2,11 @@
 
 mod actor;
 mod data;
+#[doc(hidden)]
+pub mod sync_ops;
+pub mod config;
+#[doc(hidden)]
+pub mod packages;
 mod fixture;
 mod safety;
 mod study;
