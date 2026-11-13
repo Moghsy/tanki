@@ -80,18 +80,31 @@ def check_version() -> str:
 
 
 def check_path(raw: str) -> str:
-    path = Path(raw).resolve()
-    temp = Path(tempfile.gettempdir()).resolve()
-    forbidden = [Path.home() / ".local/share/Anki2"]
+    # Reject known real bases lexically before touching the filesystem. Resolve
+    # only their parents below; resolving a base itself would inspect Anki2.
+    absolute = Path(os.path.abspath(raw))
+    forbidden = [
+        Path.home() / ".local/share/Anki2",
+        Path.home() / ".var/app/net.ankiweb.Anki/data/Anki2",
+    ]
+    if os.environ.get("XDG_DATA_HOME"):
+        forbidden.append(Path(os.environ["XDG_DATA_HOME"]) / "Anki2")
     if os.environ.get("ANKI_BASE"):
         forbidden.append(Path(os.environ["ANKI_BASE"]))
+    forbidden = [Path(os.path.abspath(base)) for base in forbidden]
+    if any(absolute.is_relative_to(base) for base in forbidden):
+        raise Refused(f"refusing {absolute}: inside a real Anki base")
+    if any(part in ("prefs21.db", "addons21") for part in absolute.parts):
+        raise Refused(f"refusing {absolute}: forbidden profile entry")
+    path = absolute.resolve()
+    temp = Path(tempfile.gettempdir()).resolve()
     reasons = []
     if path.name != "collection.anki2":
         reasons.append("not a collection.anki2 file")
     if not path.is_relative_to(temp) or path.parent == temp:
         reasons.append(f"not inside a folder under the system temp dir {temp}")
     for base in forbidden:
-        if path.is_relative_to(base.resolve()):
+        if path.is_relative_to(base.parent.resolve() / base.name):
             reasons.append(f"inside the real Anki base {base}")
     if (path.parent / "prefs21.db").exists() or (path.parent.parent / "prefs21.db").exists():
         reasons.append("next to a prefs21.db (looks like a real profile)")

@@ -29,3 +29,5 @@ jobs:
         run: |
           python3 scripts/test-license-check.py
           python3 scripts/check-licenses.py
+      - name: Replay fixture path guards
+        run: python3 scripts/test-study-replay.py
