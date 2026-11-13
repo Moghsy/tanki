@@ -24,3 +24,264 @@ pub struct DoctorReport {
 pub trait TerminalDoctor {
     fn run(&mut self, options: &DoctorOptions) -> io::Result<DoctorReport>;
 }
+
+use std::io::{IsTerminal, Read, Write};
+use std::time::{Duration, Instant};
+
+/// The system terminal capability probe. Call before starting a terminal event reader.
+#[derive(Default)]
+pub struct SystemTerminalDoctor;
+
+// A query is not an image placement. DA1 terminates the batch; unsupported replies
+// are left unknown, rather than inferred from terminal environment variables.
+const QUERY: &str = "\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[>0q\x1b[16t\x1b[14t\x1b[?u\x1b]11;?\x1b\\\x1b[?2026$p\x1b[?2031$p\x1b[?5522$p\x1b[?1016$p\x1b[c";
+const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAIAAADZF8uwAAAAIUlEQVR4nGP4YGQEQXILPkAQpggD9RThkYOLUFHRsPYdANPx2JGDc6mSAAAAAElFTkSuQmCC";
+
+#[derive(Default)]
+struct Capabilities {
+    kitty: bool,
+    sixel: bool,
+    version: Option<String>,
+    cell: Option<String>,
+    area: Option<String>,
+    keyboard: Option<String>,
+    background: Option<String>,
+    modes: [Option<String>; 4],
+    sentinel: bool,
+}
+
+fn parse(data: &[u8]) -> Capabilities {
+    let s = String::from_utf8_lossy(data);
+    let mut c = Capabilities::default();
+    c.kitty = s.contains("\x1b_Gi=31;OK\x1b\\");
+    if let Some(rest) = s.split("\x1bP>|").nth(1) {
+        c.version = rest
+            .split("\x1b\\")
+            .next()
+            .map(|v| v.chars().filter(|c| !c.is_control()).take(256).collect());
+    }
+    for part in s.split("\x1b[").skip(1) {
+        if let Some(end) = part.find('c') {
+            let body = &part[..end];
+            if let Some(params) = body.strip_prefix('?') {
+                if params.split(';').all(|v| v.parse::<u16>().is_ok()) {
+                    c.sentinel = true;
+                    c.sixel = params.split(';').any(|v| v == "4");
+                }
+            }
+        }
+        for (prefix, slot) in [("6;", &mut c.cell), ("4;", &mut c.area)] {
+            if let Some(rest) = part.strip_prefix(prefix) {
+                if let Some(end) = rest.find('t') {
+                    let value = &rest[..end];
+                    if value.split(';').count() == 2
+                        && value.split(';').all(|v| v.parse::<u16>().is_ok())
+                    {
+                        *slot = Some(value.to_owned());
+                    }
+                }
+            }
+        }
+        if let Some(rest) = part.strip_prefix('?') {
+            if let Some(end) = rest.find('u') {
+                if rest[..end].parse::<u16>().is_ok() {
+                    c.keyboard = Some(rest[..end].to_owned());
+                }
+            }
+            for (i, mode) in [2026, 2031, 5522, 1016].iter().enumerate() {
+                if let Some(rest) = rest.strip_prefix(&format!("{mode};")) {
+                    if let Some(value) = rest
+                        .strip_suffix("$y")
+                        .or_else(|| rest.split_once("$y").map(|v| v.0))
+                    {
+                        if value.parse::<u8>().is_ok() {
+                            c.modes[i] = Some(value.to_owned());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Some(rest) = s.split("\x1b]11;").nth(1) {
+        if let Some(end) = rest.find('\x07').or_else(|| rest.find("\x1b\\")) {
+            c.background = Some(
+                rest[..end]
+                    .chars()
+                    .filter(|c| !c.is_control())
+                    .take(256)
+                    .collect(),
+            );
+        }
+    }
+    c
+}
+
+fn select(requested: GraphicsMode, c: &Capabilities) -> GraphicsMode {
+    if requested != GraphicsMode::Auto {
+        requested
+    } else if c.kitty {
+        GraphicsMode::Kitty
+    } else if c.sixel {
+        GraphicsMode::Sixel
+    } else {
+        GraphicsMode::Blocks
+    }
+}
+
+fn display_value(v: &Option<String>) -> &str {
+    v.as_deref().unwrap_or("unanswered")
+}
+
+fn summary(c: &Capabilities, mode: GraphicsMode) -> String {
+    format!("Graphics: {mode:?} (kitty query: {}, sixel DA1: {})\nXTVERSION: {}\nCell pixels (height;width): {}\nText area pixels (height;width): {}\nKitty keyboard flags: {}\nBackground: {}\nMode replies (0=unrecognized, 1=set, 2=reset, 3/4=permanent): sync={}, theme={}, clipboard={}, pixel mouse={}\nDA1 sentinel: {}\nImage display requires visual confirmation.",
+        if c.kitty { "supported" } else { "unconfirmed" }, if c.sixel { "supported" } else { "unconfirmed" },
+        display_value(&c.version), display_value(&c.cell), display_value(&c.area), display_value(&c.keyboard), display_value(&c.background),
+        display_value(&c.modes[0]), display_value(&c.modes[1]), display_value(&c.modes[2]), display_value(&c.modes[3]), if c.sentinel { "received" } else { "timed out" })
+}
+
+struct RawMode;
+impl RawMode {
+    fn enter() -> io::Result<Self> {
+        crossterm::terminal::enable_raw_mode()?;
+        Ok(Self)
+    }
+}
+impl Drop for RawMode {
+    fn drop(&mut self) {
+        let _ = crossterm::terminal::disable_raw_mode();
+    }
+}
+
+#[cfg(unix)]
+fn read_replies() -> io::Result<Vec<u8>> {
+    use std::os::fd::AsRawFd;
+    let stdin = io::stdin();
+    let mut input = stdin.lock();
+    let deadline = Instant::now() + Duration::from_millis(1000);
+    let mut bytes = Vec::new();
+    while Instant::now() < deadline && bytes.len() < 16384 {
+        let timeout = deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis()
+            .min(i32::MAX as u128) as i32;
+        let mut fd = libc::pollfd {
+            fd: stdin.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let ready = unsafe { libc::poll(&mut fd, 1, timeout) };
+        if ready < 0 {
+            let e = io::Error::last_os_error();
+            if e.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(e);
+        }
+        if ready == 0 {
+            break;
+        }
+        if fd.revents & libc::POLLIN == 0 {
+            break;
+        }
+        let mut chunk = [0; 1024];
+        let n = input.read(&mut chunk)?;
+        if n == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&chunk[..n]);
+        if parse(&bytes).sentinel {
+            break;
+        }
+    }
+    Ok(bytes)
+}
+#[cfg(not(unix))]
+fn read_replies() -> io::Result<Vec<u8>> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "terminal probe is currently supported on Unix only",
+    ))
+}
+
+fn image(mode: GraphicsMode) -> String {
+    match mode {
+        GraphicsMode::Kitty => format!("\x1b_Ga=T,f=100,t=d,c=12,r=6;{PNG}\x1b\\\r\n"),
+        GraphicsMode::Iterm => format!("\x1b]1337;File=inline=1;width=12;height=6;preserveAspectRatio=0:{PNG}\x07\r\n"),
+        GraphicsMode::Sixel => "\x1bPq\"1;1;12;6#0;2;100;20;20#0!12~\x1b\\\r\n".into(),
+        GraphicsMode::Blocks => "\x1b[48;2;255;50;50m            \x1b[0m\r\n\x1b[48;2;50;150;255m            \x1b[0m\r\n".into(),
+        GraphicsMode::None | GraphicsMode::Auto => String::new(),
+    }
+}
+
+impl TerminalDoctor for SystemTerminalDoctor {
+    fn run(&mut self, options: &DoctorOptions) -> io::Result<DoctorReport> {
+        if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+            return Ok(DoctorReport { summary: "Terminal probe skipped: stdin and stdout must both be terminals; no image displayed.".into() });
+        }
+        let raw = RawMode::enter()?;
+        let mut out = io::stdout().lock();
+        out.write_all(QUERY.as_bytes())?;
+        out.flush()?;
+        let capabilities = parse(&read_replies()?);
+        let mode = select(options.graphics, &capabilities);
+        if options.show_image {
+            out.write_all(format!("Test image ({mode:?}):\r\n").as_bytes())?;
+            out.write_all(image(mode).as_bytes())?;
+            out.flush()?;
+        }
+        drop(raw);
+        Ok(DoctorReport {
+            summary: summary(&capabilities, mode),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn parses_replies() {
+        let c = parse(b"\x1b_Gi=31;OK\x1b\\\x1bP>|kitty(1)\x1b\\\x1b[6;20;10t\x1b[4;800;1000t\x1b[?3u\x1b]11;rgb:ffff/0000/0000\x1b\\\x1b[?2026;2$y\x1b[?1;4c");
+        assert!(c.kitty && c.sixel && c.sentinel);
+        assert_eq!(c.cell.as_deref(), Some("20;10"));
+        assert_eq!(c.version.as_deref(), Some("kitty(1)"));
+        assert_eq!(c.modes[0].as_deref(), Some("2"));
+        assert_eq!(c.background.as_deref(), Some("rgb:ffff/0000/0000"));
+    }
+    #[test]
+    fn chooses_and_overrides() {
+        let mut c = Capabilities::default();
+        assert_eq!(select(GraphicsMode::Auto, &c), GraphicsMode::Blocks);
+        c.sixel = true;
+        assert_eq!(select(GraphicsMode::Auto, &c), GraphicsMode::Sixel);
+        c.kitty = true;
+        assert_eq!(select(GraphicsMode::Auto, &c), GraphicsMode::Kitty);
+        for mode in [
+            GraphicsMode::Kitty,
+            GraphicsMode::Iterm,
+            GraphicsMode::Sixel,
+            GraphicsMode::Blocks,
+            GraphicsMode::None,
+        ] {
+            assert_eq!(select(mode, &c), mode);
+        }
+    }
+    #[test]
+    fn rejects_incomplete_and_false_sentinel() {
+        let c = parse(b"\x1b[?2026;4$y\x1b[?1;40c\x1b_Gi=31;ERROR\x1b\\");
+        assert!(c.sentinel && !c.sixel && !c.kitty);
+        assert!(!parse(b"\x1b[?1;4").sentinel);
+    }
+    #[test]
+    fn non_tty_skips() {
+        if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+            let report = SystemTerminalDoctor
+                .run(&DoctorOptions {
+                    graphics: GraphicsMode::Kitty,
+                    show_image: true,
+                })
+                .unwrap();
+            assert!(report.summary.contains("skipped"));
+        }
+    }
+}
