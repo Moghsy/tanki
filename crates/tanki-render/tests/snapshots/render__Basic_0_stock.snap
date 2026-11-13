@@ -1,0 +1,50 @@
+---
+source: crates/tanki-render/tests/render.rs
+expression: snapshot
+---
+question, night=false
+00|    Question [image: fixture.svg] ▶     |
+  4..12: Rgb(0, 0, 0) Reset BOLD
+  12..13: Rgb(0, 0, 0) Reset NONE
+  13..33: Rgb(0, 0, 0) Reset DIM
+  33..35: Rgb(0, 0, 0) Reset NONE
+answer_row: None
+widgets: [Widget { key: "play:q:0", kind: Replay { side: Question, index: 0 }, row: 0, col: 34, width: 1 }]
+notices: []
+
+answer, night=false
+00|    Question [image: fixture.svg] ▶     |
+  4..12: Rgb(0, 0, 0) Reset BOLD
+  12..13: Rgb(0, 0, 0) Reset NONE
+  13..33: Rgb(0, 0, 0) Reset DIM
+  33..35: Rgb(0, 0, 0) Reset NONE
+01|                                        |
+02|────────────────────────────────────────|
+  0..40: Reset Reset DIM
+03|                                        |
+04|                Answer ▶                |
+  16..24: Rgb(0, 0, 0) Reset NONE
+answer_row: Some(2)
+widgets: [Widget { key: "play:q:0", kind: Replay { side: Question, index: 0 }, row: 0, col: 34, width: 1 }, Widget { key: "play:a:0", kind: Replay { side: Answer, index: 0 }, row: 4, col: 23, width: 1 }]
+notices: []
+
+question, night=true
+00|    Question [image: fixture.svg] ▶     |
+  4..12: Reset Reset BOLD
+  13..33: Reset Reset DIM
+answer_row: None
+widgets: [Widget { key: "play:q:0", kind: Replay { side: Question, index: 0 }, row: 0, col: 34, width: 1 }]
+notices: []
+
+answer, night=true
+00|    Question [image: fixture.svg] ▶     |
+  4..12: Reset Reset BOLD
+  13..33: Reset Reset DIM
+01|                                        |
+02|────────────────────────────────────────|
+  0..40: Reset Reset DIM
+03|                                        |
+04|                Answer ▶                |
+answer_row: Some(2)
+widgets: [Widget { key: "play:q:0", kind: Replay { side: Question, index: 0 }, row: 0, col: 34, width: 1 }, Widget { key: "play:a:0", kind: Replay { side: Answer, index: 0 }, row: 4, col: 23, width: 1 }]
+notices: []

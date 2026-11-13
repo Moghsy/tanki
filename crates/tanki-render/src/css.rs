@@ -169,8 +169,7 @@ pub fn parse_declarations(block: &str) -> Vec<Declaration> {
             continue;
         };
         let name = part[..colon].trim();
-        if name.is_empty() || name.contains(|c: char| c.is_whitespace() || c == '{' || c == '}')
-        {
+        if name.is_empty() || name.contains(|c: char| c.is_whitespace() || c == '{' || c == '}') {
             continue;
         }
         let mut value = part[colon + 1..].trim();
@@ -205,7 +204,14 @@ impl StyleSheet {
         self.parse_block(&css, origin, env, order, 0);
     }
 
-    fn parse_block(&mut self, css: &str, origin: Origin, env: &MediaEnv, order: &mut u32, depth: u32) {
+    fn parse_block(
+        &mut self,
+        css: &str,
+        origin: Origin,
+        env: &MediaEnv,
+        order: &mut u32,
+        depth: u32,
+    ) {
         if depth > 16 {
             return;
         }
@@ -341,7 +347,10 @@ fn remove_nested_blocks(body: &str) -> String {
         if b[i] == b'{' {
             // Drop the nested rule's prelude (text since the last `;`) and block.
             let prefix = &body[seg_start..i];
-            let keep_until = prefix.rfind(';').map(|p| seg_start + p + 1).unwrap_or(seg_start);
+            let keep_until = prefix
+                .rfind(';')
+                .map(|p| seg_start + p + 1)
+                .unwrap_or(seg_start);
             out.push_str(&body[seg_start..keep_until]);
             let end = block_end(b, i + 1);
             i = end + 1;
@@ -605,12 +614,25 @@ pub fn parse_color(v: &str) -> Option<CssColor> {
         let cs: Vec<char> = hex.chars().collect();
         return match cs.len() {
             3 | 4 => {
-                let a = if cs.len() == 4 { d(cs[3])? as f32 / 255.0 } else { 1.0 };
+                let a = if cs.len() == 4 {
+                    d(cs[3])? as f32 / 255.0
+                } else {
+                    1.0
+                };
                 Some(CssColor::Rgba(d(cs[0])?, d(cs[1])?, d(cs[2])?, a))
             }
             6 | 8 if hex.is_ascii() => {
-                let a = if cs.len() == 8 { h(&hex[6..8])? as f32 / 255.0 } else { 1.0 };
-                Some(CssColor::Rgba(h(&hex[0..2])?, h(&hex[2..4])?, h(&hex[4..6])?, a))
+                let a = if cs.len() == 8 {
+                    h(&hex[6..8])? as f32 / 255.0
+                } else {
+                    1.0
+                };
+                Some(CssColor::Rgba(
+                    h(&hex[0..2])?,
+                    h(&hex[2..4])?,
+                    h(&hex[4..6])?,
+                    a,
+                ))
             }
             _ => None,
         };
@@ -638,7 +660,12 @@ pub fn parse_color(v: &str) -> Option<CssColor> {
                         Some(p.parse::<f32>().ok()?.clamp(0.0, 255.0).round() as u8)
                     }
                 };
-                Some(CssColor::Rgba(ch(parts[0])?, ch(parts[1])?, ch(parts[2])?, alpha))
+                Some(CssColor::Rgba(
+                    ch(parts[0])?,
+                    ch(parts[1])?,
+                    ch(parts[2])?,
+                    alpha,
+                ))
             }
             "hsl" | "hsla" => {
                 let h: f32 = parts[0].trim_end_matches("deg").parse().ok()?;
@@ -665,7 +692,11 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (u8, u8, u8) {
     let h = ((h % 360.0) + 360.0) % 360.0 / 360.0;
     let s = s.clamp(0.0, 1.0);
     let l = l.clamp(0.0, 1.0);
-    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let q = if l < 0.5 {
+        l * (1.0 + s)
+    } else {
+        l + s - l * s
+    };
     let p = 2.0 * l - q;
     let f = |mut t: f32| {
         if t < 0.0 {
@@ -851,8 +882,14 @@ mod tests {
         assert_eq!(analyze_selector(".card").0, pack(0, 1, 0));
         assert_eq!(analyze_selector("body.nightMode").0, pack(0, 1, 1));
         assert_eq!(analyze_selector("#a .b > p:first-child").0, pack(1, 2, 1));
-        assert_eq!(analyze_selector(".nightMode .cloze").1, RightKey::Class("cloze".into()));
-        assert_eq!(analyze_selector("code#typeans").1, RightKey::Id("typeans".into()));
+        assert_eq!(
+            analyze_selector(".nightMode .cloze").1,
+            RightKey::Class("cloze".into())
+        );
+        assert_eq!(
+            analyze_selector("code#typeans").1,
+            RightKey::Id("typeans".into())
+        );
         assert_eq!(analyze_selector("ul li").1, RightKey::Tag("li".into()));
         assert_eq!(analyze_selector("div :not(.x)").1, RightKey::Any);
         assert_eq!(analyze_selector("a:not(#x)").0, pack(1, 0, 1));
@@ -885,17 +922,36 @@ mod tests {
         );
         assert!(s.rules[0].declarations[1].important);
         assert_eq!(s.imports, vec!["_extra.css".to_string()]);
-        let n: Vec<_> = s.rules[3].declarations.iter().map(|d| d.name.as_str()).collect();
+        let n: Vec<_> = s.rules[3]
+            .declarations
+            .iter()
+            .map(|d| d.name.as_str())
+            .collect();
         assert_eq!(n, vec!["color", "font-weight"]);
     }
 
     #[test]
     fn colors() {
-        assert_eq!(parse_color("#afa"), Some(CssColor::Rgba(0xaa, 0xff, 0xaa, 1.0)));
-        assert_eq!(parse_color("rgb(1, 2, 3)"), Some(CssColor::Rgba(1, 2, 3, 1.0)));
-        assert_eq!(parse_color("rgba(1 2 3 / 50%)"), Some(CssColor::Rgba(1, 2, 3, 0.5)));
-        assert_eq!(parse_color("LightBlue"), Some(CssColor::Rgba(0xad, 0xd8, 0xe6, 1.0)));
-        assert_eq!(parse_color("hsl(120, 100%, 50%)"), Some(CssColor::Rgba(0, 255, 0, 1.0)));
+        assert_eq!(
+            parse_color("#afa"),
+            Some(CssColor::Rgba(0xaa, 0xff, 0xaa, 1.0))
+        );
+        assert_eq!(
+            parse_color("rgb(1, 2, 3)"),
+            Some(CssColor::Rgba(1, 2, 3, 1.0))
+        );
+        assert_eq!(
+            parse_color("rgba(1 2 3 / 50%)"),
+            Some(CssColor::Rgba(1, 2, 3, 0.5))
+        );
+        assert_eq!(
+            parse_color("LightBlue"),
+            Some(CssColor::Rgba(0xad, 0xd8, 0xe6, 1.0))
+        );
+        assert_eq!(
+            parse_color("hsl(120, 100%, 50%)"),
+            Some(CssColor::Rgba(0, 255, 0, 1.0))
+        );
         assert_eq!(parse_color("nonsense"), None);
         assert_eq!(parse_color("#ggg"), None);
     }

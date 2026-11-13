@@ -1,0 +1,39 @@
+---
+source: crates/tanki-render/tests/render.rs
+expression: "cells(&rendered, options.width)"
+---
+00|          right bold italic under strike|
+  16..20: Reset Reset BOLD
+  21..27: Reset Reset ITALIC
+  28..33: Reset Reset UNDERLINED
+  34..40: Reset Reset CROSSED_OUT
+01|                                        |
+02|green mark H₂O x² ^Q link               |
+  0..5: Rgb(0, 128, 0) Reset NONE
+  6..10: Rgb(0, 0, 0) Rgb(255, 255, 0) NONE
+  21..25: Reset Reset UNDERLINED
+03|                                        |
+04|3. third                                |
+05|   ◦ nested                             |
+06|4. fourth                               |
+07|                                        |
+08|┌───────────────────┬──────────────────┐|
+09|│         A         │        B         │|
+  10..11: Reset Reset BOLD
+  29..30: Reset Reset BOLD
+10|├───────────────────┼──────────────────┤|
+11|│ one               │ two              │|
+12|└───────────────────┴──────────────────┘|
+13|                                        |
+14|────────────────────────────────────────|
+  0..40: Reset Reset DIM
+15|                                        |
+16|か ん じ                                   |
+17| 漢 字                                    |
+18|                                 123 גבא|
+19|                                        |
+20| a  b                                   |
+21| c                                      |
+answer_row: Some(14)
+widgets: []
+notices: []

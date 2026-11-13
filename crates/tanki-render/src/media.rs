@@ -64,7 +64,8 @@ pub fn resolve(media_dir: &Path, src: &str) -> MediaRef {
     if lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("//") {
         return MediaRef::Remote(src.to_string());
     }
-    if lower.starts_with("data:") || lower.starts_with("file:") || lower.starts_with("javascript:") {
+    if lower.starts_with("data:") || lower.starts_with("file:") || lower.starts_with("javascript:")
+    {
         return MediaRef::Rejected(src.chars().take(40).collect());
     }
     let decoded = percent_decode(src);
@@ -76,14 +77,23 @@ pub fn resolve(media_dir: &Path, src: &str) -> MediaRef {
     }
     if raw_ok {
         let p = media_dir.join(src);
-        if p.exists() || !dec_ok {
-            return MediaRef::Local(p);
+        if std::fs::symlink_metadata(&p).is_ok() || !dec_ok {
+            return checked_local(p, src);
         }
     }
     match decoded {
-        Some(d) if dec_ok => MediaRef::Local(media_dir.join(d)),
+        Some(d) if dec_ok => checked_local(media_dir.join(d), src),
         _ => MediaRef::Rejected(src.to_string()),
     }
+}
+
+fn checked_local(path: PathBuf, src: &str) -> MediaRef {
+    // Reject before following the target, even when it points within the root.
+    // The actor supplies the media root; flat child names cannot traverse it.
+    if std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
+        return MediaRef::Rejected(src.to_owned());
+    }
+    MediaRef::Local(path)
 }
 
 /// The last path component of a reference, for labels.
@@ -101,9 +111,10 @@ pub fn is_svg_path(p: &Path) -> bool {
 }
 
 type DimKey = (PathBuf, u64, Option<std::time::SystemTime>);
+type DimCache = Mutex<HashMap<DimKey, Option<(u32, u32)>>>;
 
-fn dim_cache() -> &'static Mutex<HashMap<DimKey, Option<(u32, u32)>>> {
-    static CACHE: OnceLock<Mutex<HashMap<DimKey, Option<(u32, u32)>>>> = OnceLock::new();
+fn dim_cache() -> &'static DimCache {
+    static CACHE: OnceLock<DimCache> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -111,7 +122,7 @@ fn dim_cache() -> &'static Mutex<HashMap<DimKey, Option<(u32, u32)>>> {
 /// root element). `Err(true)` means the file does not exist.
 pub fn image_dimensions(path: &Path) -> Result<Option<(u32, u32)>, bool> {
     let meta = std::fs::metadata(path).map_err(|_| true)?;
-    if !meta.is_file() {
+    if !meta.is_file() || meta.len() > 64 << 20 {
         return Err(true);
     }
     let key = (path.to_path_buf(), meta.len(), meta.modified().ok());
@@ -137,10 +148,14 @@ pub fn image_dimensions(path: &Path) -> Result<Option<(u32, u32)>, bool> {
 
 /// Size of an SVG document in CSS pixels.
 pub fn svg_dimensions(data: &[u8]) -> Option<(u32, u32)> {
-    let opt = resvg::usvg::Options::default();
+    let mut opt = resvg::usvg::Options::default();
+    opt.image_href_resolver.resolve_string = Box::new(|_, _| None);
     let tree = resvg::usvg::Tree::from_data(data, &opt).ok()?;
     let s = tree.size();
-    Some((s.width().round().max(1.0) as u32, s.height().round().max(1.0) as u32))
+    Some((
+        s.width().round().max(1.0) as u32,
+        s.height().round().max(1.0) as u32,
+    ))
 }
 
 /// Inputs to image sizing.
@@ -218,18 +233,36 @@ mod tests {
             "file:///etc/passwd",
             "",
         ] {
-            assert!(matches!(resolve(dir, bad), MediaRef::Rejected(_)), "{bad} must be rejected");
+            assert!(
+                matches!(resolve(dir, bad), MediaRef::Rejected(_)),
+                "{bad} must be rejected"
+            );
         }
     }
 
     #[test]
     fn local_and_remote() {
         let dir = Path::new("/media");
-        assert_eq!(resolve(dir, "a b.jpg"), MediaRef::Local(dir.join("a b.jpg")));
-        assert_eq!(resolve(dir, "a%20b.jpg"), MediaRef::Local(dir.join("a b.jpg")));
-        assert_eq!(resolve(dir, "100%.png"), MediaRef::Local(dir.join("100%.png")));
-        assert_eq!(resolve(dir, "日本.png"), MediaRef::Local(dir.join("日本.png")));
-        assert!(matches!(resolve(dir, "https://x.org/a.png"), MediaRef::Remote(_)));
+        assert_eq!(
+            resolve(dir, "a b.jpg"),
+            MediaRef::Local(dir.join("a b.jpg"))
+        );
+        assert_eq!(
+            resolve(dir, "a%20b.jpg"),
+            MediaRef::Local(dir.join("a b.jpg"))
+        );
+        assert_eq!(
+            resolve(dir, "100%.png"),
+            MediaRef::Local(dir.join("100%.png"))
+        );
+        assert_eq!(
+            resolve(dir, "日本.png"),
+            MediaRef::Local(dir.join("日本.png"))
+        );
+        assert!(matches!(
+            resolve(dir, "https://x.org/a.png"),
+            MediaRef::Remote(_)
+        ));
         assert_eq!(display_name("https://x.org/p/a%20b.png?x=1"), "a b.png");
     }
 
@@ -237,7 +270,10 @@ mod tests {
     fn raw_name_preferred_when_it_exists() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("a%20b.png"), b"x").unwrap();
-        assert_eq!(resolve(tmp.path(), "a%20b.png"), MediaRef::Local(tmp.path().join("a%20b.png")));
+        assert_eq!(
+            resolve(tmp.path(), "a%20b.png"),
+            MediaRef::Local(tmp.path().join("a%20b.png"))
+        );
     }
 
     fn req(natural: Option<(u32, u32)>) -> SizeRequest {
@@ -258,9 +294,9 @@ mod tests {
         // Natural size.
         assert_eq!(image_cells(&req(Some((100, 40)))), (10, 2));
         // Clamped to the width, keeping the aspect ratio.
-        assert_eq!(image_cells(&req(Some((1600, 200)))), (80, 1));
+        assert_eq!(image_cells(&req(Some((1600, 200)))), (80, 5));
         // Clamped to 95% of the viewport height (22 rows).
-        assert_eq!(image_cells(&req(Some((100, 2000)))), (2, 22));
+        assert_eq!(image_cells(&req(Some((100, 2000)))), (3, 22));
         // One explicit size keeps the aspect.
         let mut r = req(Some((200, 100)));
         r.width = Some(100.0);

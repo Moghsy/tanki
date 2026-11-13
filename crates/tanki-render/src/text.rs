@@ -182,7 +182,8 @@ pub fn alpha(n: usize, upper: bool) -> String {
 
 pub fn greek(n: usize) -> String {
     const G: &[char] = &[
-        'α', 'β', 'γ', 'δ', 'ε', 'ζ', 'η', 'θ', 'ι', 'κ', 'λ', 'μ', 'ν', 'ξ', 'ο', 'π', 'ρ', 'σ', 'τ', 'υ', 'φ', 'χ', 'ψ', 'ω',
+        'α', 'β', 'γ', 'δ', 'ε', 'ζ', 'η', 'θ', 'ι', 'κ', 'λ', 'μ', 'ν', 'ξ', 'ο', 'π', 'ρ', 'σ',
+        'τ', 'υ', 'φ', 'χ', 'ψ', 'ω',
     ];
     if n == 0 || n > G.len() {
         return n.to_string();
@@ -274,6 +275,9 @@ mod tests {
         assert!(contrast(blue, dark) >= MIN_CONTRAST);
         assert!(blue.2 == 255, "keeps the hue: {blue:?}");
         // Already readable colours are untouched.
-        assert_eq!(ensure_contrast(Rgb(0, 0, 255), Rgb(255, 255, 255)), Rgb(0, 0, 255));
+        assert_eq!(
+            ensure_contrast(Rgb(0, 0, 255), Rgb(255, 255, 255)),
+            Rgb(0, 0, 255)
+        );
     }
 }

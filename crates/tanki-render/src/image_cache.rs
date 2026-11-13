@@ -37,7 +37,10 @@ impl Inner {
         let shared = Arc::new(Shared::default());
         let (tx, rx) = channel::<Key>();
         let rx = Arc::new(Mutex::new(rx));
-        let n = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).clamp(1, 4);
+        let n = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(2)
+            .clamp(1, 4);
         for i in 0..n {
             let rx = rx.clone();
             let shared = shared.clone();
@@ -62,7 +65,9 @@ impl Inner {
     pub(crate) fn request(&self, source: &ImageSource, max_px: (u32, u32)) {
         let key = (source.clone(), (max_px.0.max(1), max_px.1.max(1)));
         {
-            let Ok(mut map) = self.shared.map.lock() else { return };
+            let Ok(mut map) = self.shared.map.lock() else {
+                return;
+            };
             if map.contains_key(&key) {
                 return;
             }
@@ -75,9 +80,11 @@ impl Inner {
             .and_then(|j| j.as_ref().map(|tx| tx.send(key.clone()).is_ok()))
             .unwrap_or(false);
         if !sent {
-            // No worker thread: decode here rather than never.
-            let result = decode(&key.0, key.1);
-            self.shared.finish(key, result);
+            // The UI thread must never decode, even if workers are unavailable.
+            self.shared.finish(
+                key,
+                Err(ImageError::Decode("image worker unavailable".into())),
+            );
         }
     }
 
@@ -113,7 +120,10 @@ impl Shared {
         let tick = self.tick.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let Ok(mut map) = self.map.lock() {
             map.insert(key, Entry::Done(result, tick));
-            let done = map.values().filter(|e| matches!(e, Entry::Done(..))).count();
+            let done = map
+                .values()
+                .filter(|e| matches!(e, Entry::Done(..)))
+                .count();
             if done > CAPACITY {
                 let oldest = map
                     .iter()
@@ -138,7 +148,9 @@ fn looks_like_svg(data: &[u8]) -> bool {
     let head = &data[..data.len().min(512)];
     let s = String::from_utf8_lossy(head);
     let t = s.trim_start_matches('\u{feff}').trim_start();
-    t.starts_with("<svg") || (t.starts_with("<?xml") || t.starts_with("<!--") || t.starts_with("<!DOCTYPE")) && s.contains("<svg")
+    t.starts_with("<svg")
+        || (t.starts_with("<?xml") || t.starts_with("<!--") || t.starts_with("<!DOCTYPE"))
+            && s.contains("<svg")
 }
 
 /// Decodes `source` and scales it to fit `max_px`, keeping the aspect ratio.
@@ -151,7 +163,10 @@ pub(crate) fn decode(source: &ImageSource, max_px: (u32, u32)) -> Ready {
                 return Err(ImageError::NotFound(path.clone()));
             }
             if meta.len() > MAX_FILE_BYTES {
-                return Err(ImageError::Unsupported(format!("file too large: {} bytes", meta.len())));
+                return Err(ImageError::Unsupported(format!(
+                    "file too large: {} bytes",
+                    meta.len()
+                )));
             }
             let data = std::fs::read(path).map_err(|e| ImageError::Decode(e.to_string()))?;
             if crate::media::is_svg_path(path) || looks_like_svg(&data) {
@@ -164,7 +179,12 @@ pub(crate) fn decode(source: &ImageSource, max_px: (u32, u32)) -> Ready {
 
 fn decode_raster(data: &[u8], path: &Path, max_px: (u32, u32)) -> Ready {
     let format = image::guess_format(data).map_err(|_| {
-        ImageError::Unsupported(path.extension().and_then(|e| e.to_str()).unwrap_or("unknown").to_string())
+        ImageError::Unsupported(
+            path.extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("unknown")
+                .to_string(),
+        )
     })?;
     let mut reader = image::ImageReader::with_format(std::io::Cursor::new(data), format);
     let mut limits = image::Limits::default();
@@ -211,15 +231,139 @@ fn render_svg(data: &[u8], max_px: (u32, u32)) -> Ready {
     }
     let pw = ((size.width() * scale).round() as u32).clamp(1, 8192);
     let ph = ((size.height() * scale).round() as u32).clamp(1, 8192);
-    let mut pixmap =
-        resvg::tiny_skia::Pixmap::new(pw, ph).ok_or_else(|| ImageError::Decode("SVG too large".into()))?;
-    resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(scale, scale), &mut pixmap.as_mut());
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(pw, ph)
+        .ok_or_else(|| ImageError::Decode("SVG too large".into()))?;
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
     // tiny-skia stores premultiplied RGBA; convert to straight alpha.
     let mut rgba = Vec::with_capacity((pw * ph * 4) as usize);
     for p in pixmap.pixels() {
         let c = p.demultiply();
         rgba.extend_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
     }
-    let img = image::RgbaImage::from_raw(pw, ph, rgba).ok_or_else(|| ImageError::Decode("bad pixmap".into()))?;
+    let img = image::RgbaImage::from_raw(pw, ph, rgba)
+        .ok_or_else(|| ImageError::Decode("bad pixmap".into()))?;
     Ok(Arc::new(DynamicImage::ImageRgba8(img)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raster_formats_decode_and_scale() {
+        let dir = tempfile::tempdir().unwrap();
+        let img = DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            20,
+            10,
+            image::Rgb([200, 20, 10]),
+        ));
+        for extension in ["png", "jpg", "gif", "webp"] {
+            let path = dir.path().join(format!("fixture.{extension}"));
+            img.save(&path).unwrap();
+            let decoded = decode(&ImageSource::File(path), (10, 10)).unwrap();
+            assert_eq!((decoded.width(), decoded.height()), (10, 5), "{extension}");
+        }
+    }
+
+    #[test]
+    fn gif_uses_first_frame() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("animated.gif");
+        {
+            let mut writer =
+                image::codecs::gif::GifEncoder::new(std::fs::File::create(&path).unwrap());
+            for rgba in [[255, 0, 0, 255], [0, 0, 255, 255]] {
+                writer
+                    .encode_frame(image::Frame::new(image::RgbaImage::from_pixel(
+                        2,
+                        2,
+                        image::Rgba(rgba),
+                    )))
+                    .unwrap();
+            }
+        }
+        let decoded = decode(&ImageSource::File(path), (2, 2)).unwrap().to_rgba8();
+        assert_eq!(decoded.get_pixel(0, 0).0, [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn svg_scales_and_never_loads_external_images() {
+        let dir = tempfile::tempdir().unwrap();
+        let external = dir.path().join("outside.png");
+        image::RgbaImage::from_pixel(20, 10, image::Rgba([255, 0, 0, 255]))
+            .save(&external)
+            .unwrap();
+        let svg = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="20" height="10"><rect width="20" height="10" fill="blue"/><image xlink:href="{}" width="20" height="10"/></svg>"#,
+            external.display()
+        );
+        let decoded = decode(&ImageSource::Svg(svg), (10, 10)).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (10, 5));
+        assert_eq!(decoded.to_rgba8().get_pixel(5, 2).0, [0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn cache_notifies_subscribers_and_deduplicates_requests() {
+        let cache = crate::ImageCache::new();
+        let first = cache.subscribe();
+        let second = cache.subscribe();
+        let source = ImageSource::Svg(r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10" fill="red"/></svg>"#.into());
+        cache.request(&source, (10, 10));
+        first
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        second
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        let image = cache.get(&source, (10, 10)).unwrap().unwrap();
+        cache.request(&source, (10, 10));
+        let cached = cache.get(&source, (10, 10)).unwrap().unwrap();
+        assert!(Arc::ptr_eq(&image, &cached));
+        assert!(first.try_recv().is_err());
+        assert_eq!((image.width(), image.height()), (10, 5));
+    }
+
+    #[test]
+    fn missing_and_invalid_images_are_cached_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = ImageSource::File(dir.path().join("missing.png"));
+        let cache = crate::ImageCache::new();
+        let events = cache.subscribe();
+        cache.request(&source, (20, 20));
+        events
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        assert!(matches!(
+            cache.get(&source, (20, 20)),
+            Some(Err(ImageError::NotFound(_)))
+        ));
+        assert!(matches!(
+            decode(&ImageSource::Svg("<broken>".into()), (20, 20)),
+            Err(ImageError::Decode(_))
+        ));
+        let bad = dir.path().join("bad.png");
+        std::fs::write(&bad, b"not an image").unwrap();
+        assert!(matches!(
+            decode(&ImageSource::File(bad), (20, 20)),
+            Err(ImageError::Unsupported(_))
+        ));
+    }
+
+    #[test]
+    fn completed_cache_is_bounded() {
+        let shared = Shared::default();
+        for i in 0..CAPACITY + 4 {
+            shared.finish(
+                (ImageSource::Svg(i.to_string()), (1, 1)),
+                Err(ImageError::Unsupported("fixture".into())),
+            );
+        }
+        let map = shared.map.lock().unwrap();
+        assert_eq!(map.len(), CAPACITY);
+        assert!(!map.contains_key(&(ImageSource::Svg("0".into()), (1, 1))));
+    }
 }

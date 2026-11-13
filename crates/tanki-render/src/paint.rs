@@ -48,11 +48,18 @@ pub fn paint(card: &RenderedCard, scroll: usize, area: Rect, buf: &mut Buffer) {
         for x in area.left()..area.right() {
             if let Some(cell) = buf.cell_mut((x, y)) {
                 cell.set_symbol(" ");
+                cell.fg = Color::Reset;
                 cell.modifier = Modifier::empty();
             }
         }
     }
-    for (i, line) in card.lines.iter().skip(scroll).take(area.height as usize).enumerate() {
+    for (i, line) in card
+        .lines
+        .iter()
+        .skip(scroll)
+        .take(area.height as usize)
+        .enumerate()
+    {
         let y = area.y + i as u16;
         let mut x = area.x;
         for span in &line.spans {

@@ -166,7 +166,11 @@ impl Para {
                 Transform::Upper => c.to_uppercase().next().unwrap_or(c),
                 Transform::Lower => c.to_lowercase().next().unwrap_or(c),
                 Transform::Capitalize => {
-                    let out = if !self.prev_alnum { c.to_uppercase().next().unwrap_or(c) } else { c };
+                    let out = if !self.prev_alnum {
+                        c.to_uppercase().next().unwrap_or(c)
+                    } else {
+                        c
+                    };
                     self.prev_alnum = c.is_alphanumeric();
                     out
                 }
@@ -216,7 +220,10 @@ impl Para {
 
     /// Appends text that is laid out but not visible (`visibility: hidden`).
     pub fn push_hidden(&mut self, s: &str, ws: WhiteSpace) {
-        let st = TStyle { meta: Meta::default(), ws };
+        let st = TStyle {
+            meta: Meta::default(),
+            ws,
+        };
         let mut collapsed = Para::new(Align::Left, false, false);
         collapsed.last_space = self.last_space;
         collapsed.push_text(s, &st, Transform::None);
@@ -277,7 +284,11 @@ impl Para {
         }
         let mut out = Vec::new();
         for mut line in lines {
-            if rtl || line.iter().any(|u| u.kind == UK::Text && self.text[u.start..u.end].chars().any(is_rtl_char)) {
+            if rtl
+                || line.iter().any(|u| {
+                    u.kind == UK::Text && self.text[u.start..u.end].chars().any(is_rtl_char)
+                })
+            {
                 line = self.reorder(line, rtl);
             }
             let rows = self.compose(&line);
@@ -333,7 +344,10 @@ impl Para {
                         (UK::Space, 1)
                     } else {
                         let w = grapheme_width(g);
-                        if w == 0 && g.chars().all(|c| c == '\u{200B}' || c == '\u{AD}' || c.is_control()) {
+                        if w == 0
+                            && g.chars()
+                                .all(|c| c == '\u{200B}' || c == '\u{AD}' || c.is_control())
+                        {
                             continue;
                         }
                         (UK::Text, w)
@@ -365,7 +379,9 @@ impl Para {
     }
 
     fn piece_index_at(&self, byte: usize) -> usize {
-        self.pieces.partition_point(|p| p.end <= byte).min(self.pieces.len().saturating_sub(1))
+        self.pieces
+            .partition_point(|p| p.end <= byte)
+            .min(self.pieces.len().saturating_sub(1))
     }
 
     fn break_lines(&self, width: usize) -> Vec<Vec<Unit>> {
@@ -379,7 +395,11 @@ impl Para {
             let mandatory = op == unicode_linebreak::BreakOpportunity::Mandatory;
             if !mandatory && pos < self.text.len() {
                 // No soft wrap inside `nowrap`/`pre` text.
-                let before = self.text[..pos].chars().next_back().map(|c| pos - c.len_utf8()).unwrap_or(0);
+                let before = self.text[..pos]
+                    .chars()
+                    .next_back()
+                    .map(|c| pos - c.len_utf8())
+                    .unwrap_or(0);
                 if !self.piece_wraps(self.piece_index_at(before)) {
                     continue;
                 }
@@ -387,7 +407,11 @@ impl Para {
             seg.clear();
             self.units(prev, pos, &mut cursor, &mut seg);
             prev = pos;
-            let core_len = seg.iter().rposition(|u| u.kind != UK::Space).map(|i| i + 1).unwrap_or(0);
+            let core_len = seg
+                .iter()
+                .rposition(|u| u.kind != UK::Space)
+                .map(|i| i + 1)
+                .unwrap_or(0);
             let w_core: usize = seg[..core_len].iter().map(|u| u.width).sum();
             let w_full: usize = seg.iter().map(|u| u.width).sum();
             if cur_w + w_core <= width {
@@ -563,14 +587,23 @@ mod tests {
     }
 
     fn text_rows(rows: &[IRow]) -> Vec<String> {
-        rows.iter().map(|r| r.iter().map(|s| s.text.as_str()).collect()).collect()
+        rows.iter()
+            .map(|r| r.iter().map(|s| s.text.as_str()).collect())
+            .collect()
     }
 
     #[test]
     fn collapses_and_wraps() {
         let mut p = Para::new(Align::Left, false, false);
-        p.push_text("  hello   world\n  and more text ", &plain(), Transform::None);
-        assert_eq!(text_rows(&p.layout(11)), vec!["hello world", "and more", "text"]);
+        p.push_text(
+            "  hello   world\n  and more text ",
+            &plain(),
+            Transform::None,
+        );
+        assert_eq!(
+            text_rows(&p.layout(11)),
+            vec!["hello world", "and more", "text"]
+        );
     }
 
     #[test]
@@ -638,12 +671,18 @@ mod tests {
         p.push_atom(Atom {
             width: 3,
             rows: vec![
-                vec![ISpan { text: "   ".into(), meta: meta.clone() }],
-                vec![ISpan { text: "   ".into(), meta }],
+                vec![ISpan {
+                    text: "   ".into(),
+                    meta: meta.clone(),
+                }],
+                vec![ISpan {
+                    text: "   ".into(),
+                    meta,
+                }],
             ],
         });
         p.push_text(" y", &plain(), Transform::None);
         let rows = p.layout(20);
-        assert_eq!(text_rows(&rows), vec!["  ", "x     y"]);
+        assert_eq!(text_rows(&rows), vec!["     ", "x     y"]);
     }
 }

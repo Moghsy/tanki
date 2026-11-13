@@ -4,11 +4,13 @@
 use crate::css::{MediaEnv, Origin, StyleSheet};
 use crate::media::{self, MediaRef, SizeRequest};
 use crate::para::{push_span, row_width, spaces, Atom, IRow, ISpan, Meta, Para, TStyle};
-use crate::style::{Align, Computed, Display, Fg, Len, ListStyle, Styler, VAlign, WhiteSpace, UA_CSS};
+use crate::style::{
+    Align, Computed, Display, Fg, Len, ListStyle, Styler, VAlign, WhiteSpace, UA_CSS,
+};
 use crate::text::{self, ensure_contrast, map_script, str_width};
 use crate::{
-    AudioSide, CardSide, ImageBlock, ImageSource, Line, RenderOptions, RenderedCard, Rgb, RubyMode, Span, Style,
-    Widget, WidgetKind,
+    AudioSide, CardSide, ImageBlock, ImageSource, Line, RenderOptions, RenderedCard, Rgb, RubyMode,
+    Span, Style, Widget, WidgetKind,
 };
 use ego_tree::NodeId;
 use scraper::node::Node;
@@ -124,12 +126,18 @@ fn load_sheet(author_css: &[String], env: &MediaEnv) -> Rc<StyleSheet> {
     author_css.hash(&mut h);
     (env.width_px as u32, env.height_px as u32, env.dark).hash(&mut h);
     let key = h.finish();
-    if let Some(s) = SHEETS.with(|c| c.borrow().iter().find(|(k, _)| *k == key).map(|(_, s)| s.clone())) {
+    if let Some(s) = SHEETS.with(|c| {
+        c.borrow()
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, s)| s.clone())
+    }) {
         return s;
     }
     let mut sheet = StyleSheet::default();
     let mut order = 0;
     sheet.parse_into(UA_CSS, Origin::UserAgent, env, &mut order);
+    sheet.parse_into(crate::style::REVIEWER_CSS, Origin::Author, env, &mut order);
     for css in author_css {
         sheet.parse_into(css, Origin::Author, env, &mut order);
     }
@@ -145,7 +153,9 @@ fn load_sheet(author_css: &[String], env: &MediaEnv) -> Rc<StyleSheet> {
 }
 
 fn escape_attr(s: &str) -> String {
-    s.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;")
+    s.replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
 }
 
 /// Reads a local stylesheet named by `<link>` or `@import` (media folder only).
@@ -163,9 +173,10 @@ fn read_local_css(media_dir: &Path, href: &str) -> Option<String> {
 }
 
 fn attr_has_word(el: &ElementRef, attr: &str, word: &str) -> bool {
-    el.value()
-        .attr(attr)
-        .is_some_and(|v| v.split_ascii_whitespace().any(|w| w.eq_ignore_ascii_case(word)))
+    el.value().attr(attr).is_some_and(|v| {
+        v.split_ascii_whitespace()
+            .any(|w| w.eq_ignore_ascii_case(word))
+    })
 }
 
 pub fn render(side: &CardSide, opts: &RenderOptions) -> RenderedCard {
@@ -173,7 +184,10 @@ pub fn render(side: &CardSide, opts: &RenderOptions) -> RenderedCard {
     if width == 0 {
         return RenderedCard::default();
     }
-    let cell_px = opts.cell_px.filter(|(w, h)| *w > 0 && *h > 0).unwrap_or((10, 20));
+    let cell_px = opts
+        .cell_px
+        .filter(|(w, h)| *w > 0 && *h > 0)
+        .unwrap_or((10, 20));
     let mut body_classes = side.body_classes.trim().to_string();
     if opts.night_mode {
         for c in ["nightMode", "night_mode"] {
@@ -183,7 +197,11 @@ pub fn render(side: &CardSide, opts: &RenderOptions) -> RenderedCard {
             }
         }
     }
-    let html_class = if opts.night_mode { "linux chrome night-mode" } else { "linux chrome" };
+    let html_class = if opts.night_mode {
+        "linux chrome night-mode"
+    } else {
+        "linux chrome"
+    };
     let doc = format!(
         "<!doctype html><html class=\"{}\"><body class=\"{}\"><div id=\"qa\">{}</div></body></html>",
         html_class,
@@ -196,11 +214,17 @@ pub fn render(side: &CardSide, opts: &RenderOptions) -> RenderedCard {
     // <link rel=stylesheet>/@import files in document order.
     let mut author_css = vec![side.css.clone()];
     for node in dom.tree.root().descendants() {
-        let Some(el) = ElementRef::wrap(node) else { continue };
+        let Some(el) = ElementRef::wrap(node) else {
+            continue;
+        };
         match el.value().name() {
             "style" => author_css.push(el.text().collect()),
             "link" if attr_has_word(&el, "rel", "stylesheet") => {
-                if let Some(css) = el.value().attr("href").and_then(|h| read_local_css(&side.media_dir, h)) {
+                if let Some(css) = el
+                    .value()
+                    .attr("href")
+                    .and_then(|h| read_local_css(&side.media_dir, h))
+                {
                     author_css.push(css);
                 }
             }
@@ -227,8 +251,16 @@ pub fn render(side: &CardSide, opts: &RenderOptions) -> RenderedCard {
         }
     }
 
-    let canvas = opts.bg.unwrap_or(if opts.night_mode { DARK_CANVAS } else { LIGHT_CANVAS });
-    let default_fg = opts.fg.unwrap_or(if opts.night_mode { Rgb(0xdd, 0xdd, 0xdd) } else { Rgb(0x20, 0x20, 0x20) });
+    let canvas = opts.bg.unwrap_or(if opts.night_mode {
+        DARK_CANVAS
+    } else {
+        LIGHT_CANVAS
+    });
+    let default_fg = opts.fg.unwrap_or(if opts.night_mode {
+        Rgb(0xdd, 0xdd, 0xdd)
+    } else {
+        Rgb(0x20, 0x20, 0x20)
+    });
     let styler = Styler {
         sheet,
         cell_px: (cell_px.0 as f32, cell_px.1 as f32),
@@ -260,12 +292,22 @@ pub fn render(side: &CardSide, opts: &RenderOptions) -> RenderedCard {
     let avail_px = env.width_px;
     let root = Computed::root(16.0);
     let mut html_st = w.styler.compute(html_el, &root, avail_px);
+    if html_st.display == Display::None {
+        return RenderedCard::default();
+    }
     w.styler.base_font_px = html_st.font_px;
-    let Some(body) = html_el.children().filter_map(ElementRef::wrap).find(|e| e.value().name() == "body") else {
+    let Some(body) = html_el
+        .children()
+        .filter_map(ElementRef::wrap)
+        .find(|e| e.value().name() == "body")
+    else {
         return RenderedCard::default();
     };
     html_st.bg = None;
     let mut body_st = w.styler.compute(body, &html_st, avail_px);
+    if body_st.display == Display::None {
+        return RenderedCard::default();
+    }
     w.styler.base_font_px = body_st.font_px;
     // The page canvas is the terminal's own background (R3 §8.1 step 8).
     body_st.bg = None;
@@ -294,7 +336,9 @@ impl Walker<'_> {
         let mut details_n = 0;
         let mut scripts = Vec::new();
         for node in dom.tree.root().descendants() {
-            let Some(el) = ElementRef::wrap(node) else { continue };
+            let Some(el) = ElementRef::wrap(node) else {
+                continue;
+            };
             let e = el.value();
             match e.name() {
                 "a" if attr_has_word(&el, "class", "hint") => {
@@ -311,14 +355,27 @@ impl Walker<'_> {
                     let key = format!("hint:{hint_n}");
                     hint_n += 1;
                     let expanded = self.opts.expanded.contains(&key);
-                    let label = el.text().collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
+                    let label = el
+                        .text()
+                        .collect::<String>()
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ");
                     if let Some(t) = target {
                         self.hint_targets.insert(t, expanded);
                     }
-                    self.hint_anchors.insert(node.id(), HintAnchor { key, label, expanded });
+                    self.hint_anchors.insert(
+                        node.id(),
+                        HintAnchor {
+                            key,
+                            label,
+                            expanded,
+                        },
+                    );
                 }
                 "details" => {
-                    self.details_keys.insert(node.id(), format!("details:{details_n}"));
+                    self.details_keys
+                        .insert(node.id(), format!("details:{details_n}"));
                     details_n += 1;
                 }
                 "script" => {
@@ -327,9 +384,13 @@ impl Walker<'_> {
                         scripts.push(t);
                     }
                 }
-                "iframe" | "object" | "embed" => self.notice("card embeds external content (iframe/object) that is not shown"),
+                "iframe" | "object" | "embed" => {
+                    self.notice("card embeds external content (iframe/object) that is not shown")
+                }
                 "video" | "audio" => self.notice("card has HTML audio/video that is not played"),
-                "button" | "select" | "textarea" => self.notice("card has buttons or inputs that need JavaScript"),
+                "button" | "select" | "textarea" => {
+                    self.notice("card has buttons or inputs that need JavaScript")
+                }
                 "input" if e.id() != Some("typeans") => {
                     self.notice("card has buttons or inputs that need JavaScript")
                 }
@@ -344,7 +405,12 @@ impl Walker<'_> {
             self.notices.retain(|n| !n.starts_with("card has buttons"));
             self.notice("image occlusion masks are not drawn yet");
             scripts.retain(|s| !s.contains("imageOcclusion"));
-        } else if dom.tree.root().descendants().any(|n| ElementRef::wrap(n).is_some_and(|e| e.value().name() == "canvas")) {
+        } else if dom
+            .tree
+            .root()
+            .descendants()
+            .any(|n| ElementRef::wrap(n).is_some_and(|e| e.value().name() == "canvas"))
+        {
             self.notice("card draws on a canvas, which is not shown");
         }
         if !scripts.is_empty() {
@@ -353,10 +419,16 @@ impl Walker<'_> {
     }
 
     fn compute(&self, el: ElementRef, parent: &Computed, frame: Frame) -> Computed {
-        let mut st = self.styler.compute(el, parent, frame.width as f32 * self.cell_px.0 as f32);
+        let mut st = self
+            .styler
+            .compute(el, parent, frame.width as f32 * self.cell_px.0 as f32);
         if let Some(id) = el.value().id() {
             if let Some(&expanded) = self.hint_targets.get(id) {
-                st.display = if expanded { Display::Block } else { Display::None };
+                st.display = if expanded {
+                    Display::Block
+                } else {
+                    Display::None
+                };
             }
         }
         st
@@ -427,7 +499,14 @@ impl Walker<'_> {
     }
 
     /// A block-level element: margins, indent, then its special layout or flow.
-    fn block(&mut self, el: ElementRef, st: &Computed, out: &mut Out, frame: Frame, parent_align: Align) {
+    fn block(
+        &mut self,
+        el: ElementRef,
+        st: &Computed,
+        out: &mut Out,
+        frame: Frame,
+        parent_align: Align,
+    ) {
         if st.fancy_layout {
             self.notice("card uses CSS layout tanki cannot show (flex, grid or positioning)");
         }
@@ -447,7 +526,13 @@ impl Walker<'_> {
                     },
                     ..Meta::default()
                 };
-                out.emit(vec![ISpan { text: "─".repeat(inner.width), meta }], inner.col);
+                out.emit(
+                    vec![ISpan {
+                        text: "─".repeat(inner.width),
+                        meta,
+                    }],
+                    inner.col,
+                );
                 if el.value().id() == Some("answer") && out.answer_row.is_none() {
                     out.answer_row = Some(out.rows.len() - 1);
                 }
@@ -489,7 +574,14 @@ impl Walker<'_> {
         self.flush(&mut para, out, frame);
     }
 
-    fn flow(&mut self, parent: ElementRef, pst: &Computed, out: &mut Out, frame: Frame, para: &mut Para) {
+    fn flow(
+        &mut self,
+        parent: ElementRef,
+        pst: &Computed,
+        out: &mut Out,
+        frame: Frame,
+        para: &mut Para,
+    ) {
         self.depth += 1;
         if self.depth > MAX_DEPTH {
             let t: String = parent.text().collect();
@@ -501,7 +593,9 @@ impl Walker<'_> {
             match child.value() {
                 Node::Text(t) => self.text(t, pst, para),
                 Node::Element(_) => {
-                    let Some(el) = ElementRef::wrap(child) else { continue };
+                    let Some(el) = ElementRef::wrap(child) else {
+                        continue;
+                    };
                     self.element(el, pst, out, frame, para);
                 }
                 _ => {}
@@ -510,15 +604,22 @@ impl Walker<'_> {
         self.depth -= 1;
     }
 
-    fn element(&mut self, el: ElementRef, pst: &Computed, out: &mut Out, frame: Frame, para: &mut Para) {
+    fn element(
+        &mut self,
+        el: ElementRef,
+        pst: &Computed,
+        out: &mut Out,
+        frame: Frame,
+        para: &mut Para,
+    ) {
         let st = self.compute(el, pst, frame);
         if st.display == Display::None || st.display == Display::TableColumn {
             return;
         }
         let tag = el.value().name();
         match tag {
-            "script" | "style" | "canvas" | "iframe" | "object" | "embed" | "video" | "audio" | "button" | "select"
-            | "textarea" | "noscript" | "template" | "head" => return,
+            "script" | "style" | "canvas" | "iframe" | "object" | "embed" | "video" | "audio"
+            | "button" | "select" | "textarea" | "noscript" | "template" | "head" => return,
             "input" => {
                 if el.value().id() == Some("typeans") {
                     self.flush(para, out, frame);
@@ -527,7 +628,13 @@ impl Walker<'_> {
                         widget: Some(idx),
                         ..Meta::default()
                     };
-                    out.emit(vec![ISpan { text: spaces(frame.width), meta }], frame.col);
+                    out.emit(
+                        vec![ISpan {
+                            text: spaces(frame.width),
+                            meta,
+                        }],
+                        frame.col,
+                    );
                 }
                 return;
             }
@@ -550,6 +657,21 @@ impl Walker<'_> {
             | Display::TableRowGroup
             | Display::TableCaption => {
                 self.flush(para, out, frame);
+                // Replaced elements still draw their image when author CSS
+                // promotes them to blocks; walking their empty children would
+                // otherwise silently discard them.
+                if matches!(tag, "img" | "svg") {
+                    out.margin(st.margin_top);
+                    let mut image_para = Self::new_para(&st);
+                    if tag == "img" {
+                        self.image(el, &st, &mut image_para, frame);
+                    } else {
+                        self.inline_svg(el, &st, &mut image_para, frame);
+                    }
+                    self.flush(&mut image_para, out, frame);
+                    out.margin(st.margin_bottom);
+                    return;
+                }
                 self.block(el, &st, out, frame, pst.align);
                 return;
             }
@@ -580,7 +702,10 @@ impl Walker<'_> {
                 if tag == "a" {
                     if let Some(href) = el.value().attr("href") {
                         let h = href.trim();
-                        if !h.is_empty() && !h.starts_with('#') && !h.to_ascii_lowercase().starts_with("javascript:") {
+                        if !h.is_empty()
+                            && !h.starts_with('#')
+                            && !h.to_ascii_lowercase().starts_with("javascript:")
+                        {
                             self.cur_link = Some(Rc::from(h));
                         }
                     }
@@ -622,8 +747,15 @@ impl Walker<'_> {
             match parsed {
                 Some((side, index, len)) => {
                     if !self.opts.hide_audio_buttons {
-                        let s = if side == AudioSide::Question { 'q' } else { 'a' };
-                        let idx = self.add_widget(format!("play:{s}:{index}"), WidgetKind::Replay { side, index });
+                        let s = if side == AudioSide::Question {
+                            'q'
+                        } else {
+                            'a'
+                        };
+                        let idx = self.add_widget(
+                            format!("play:{s}:{index}"),
+                            WidgetKind::Replay { side, index },
+                        );
                         let mut ts = self.tstyle(st);
                         ts.meta.widget = Some(idx);
                         ts.meta.style.underline = false;
@@ -671,7 +803,11 @@ impl Walker<'_> {
             i += 1;
         }
         let tail = &t[last..];
-        para.push_text(tail, if self.in_math { &dimmed } else { &normal }, st.transform);
+        para.push_text(
+            tail,
+            if self.in_math { &dimmed } else { &normal },
+            st.transform,
+        );
     }
 
     fn placeholder(&mut self, label: &str, st: &Computed, para: &mut Para) {
@@ -689,14 +825,24 @@ impl Walker<'_> {
         }
     }
 
-    fn image_atom(&mut self, source: ImageSource, natural: Option<(u32, u32)>, st: &Computed, frame: Frame, alt: String) -> Atom {
+    fn image_atom(
+        &mut self,
+        source: ImageSource,
+        natural: Option<(u32, u32)>,
+        st: &Computed,
+        frame: Frame,
+        alt: String,
+    ) -> Atom {
         let avail_px = frame.width as f32 * self.cell_px.0 as f32;
         let req = SizeRequest {
             natural,
             width: Self::resolve_len(st.width, avail_px),
             height: Self::resolve_len(st.height, avail_px),
             max_width: Self::resolve_len(st.max_width, avail_px),
-            max_height: Self::resolve_len(st.max_height, self.opts.viewport_rows as f32 * self.cell_px.1 as f32),
+            max_height: Self::resolve_len(
+                st.max_height,
+                self.opts.viewport_rows as f32 * self.cell_px.1 as f32,
+            ),
             cell_px: self.cell_px,
             max_cols: frame.width,
             viewport_rows: self.opts.viewport_rows,
@@ -715,7 +861,14 @@ impl Walker<'_> {
         };
         Atom {
             width: w,
-            rows: (0..h).map(|_| vec![ISpan { text: spaces(w), meta: meta.clone() }]).collect(),
+            rows: (0..h)
+                .map(|_| {
+                    vec![ISpan {
+                        text: spaces(w),
+                        meta: meta.clone(),
+                    }]
+                })
+                .collect(),
         }
     }
 
@@ -775,7 +928,8 @@ impl Walker<'_> {
         }
         match media::svg_dimensions(svg.as_bytes()) {
             Some(dims) => {
-                let atom = self.image_atom(ImageSource::Svg(svg), Some(dims), st, frame, "svg".into());
+                let atom =
+                    self.image_atom(ImageSource::Svg(svg), Some(dims), st, frame, "svg".into());
                 para.push_atom(atom);
             }
             None => self.placeholder("[svg image]", st, para),
@@ -792,7 +946,9 @@ impl Walker<'_> {
                     }
                 }
                 Node::Element(_) => {
-                    let Some(c) = ElementRef::wrap(child) else { continue };
+                    let Some(c) = ElementRef::wrap(child) else {
+                        continue;
+                    };
                     let cst = self.compute(c, st, frame);
                     if cst.display != Display::None {
                         self.runs(c, &cst, frame, out);
@@ -804,13 +960,16 @@ impl Walker<'_> {
     }
 
     fn ruby(&mut self, el: ElementRef, st: &Computed, para: &mut Para, frame: Frame) {
-        let mut pairs: Vec<(Vec<(String, Meta)>, Vec<(String, Meta)>)> = Vec::new();
+        type StyledRuns = Vec<(String, Meta)>;
+        let mut pairs: Vec<(StyledRuns, StyledRuns)> = Vec::new();
         let mut base: Vec<(String, Meta)> = Vec::new();
         for child in el.children() {
             match child.value() {
                 Node::Text(t) => base.push((t.to_string(), self.meta(st))),
                 Node::Element(e) => {
-                    let Some(c) = ElementRef::wrap(child) else { continue };
+                    let Some(c) = ElementRef::wrap(child) else {
+                        continue;
+                    };
                     match e.name() {
                         "rp" => {}
                         "rt" => {
@@ -911,7 +1070,14 @@ impl Walker<'_> {
     }
 
     /// `<sub>`/`<sup>`: Unicode forms when every character has one.
-    fn script(&mut self, el: ElementRef, st: &Computed, out: &mut Out, frame: Frame, para: &mut Para) {
+    fn script(
+        &mut self,
+        el: ElementRef,
+        st: &Computed,
+        out: &mut Out,
+        frame: Frame,
+        para: &mut Para,
+    ) {
         let sup = st.valign == VAlign::Super;
         let raw: String = el.text().collect();
         let t = raw.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -930,7 +1096,11 @@ impl Walker<'_> {
         let ts = self.tstyle(st);
         let multi = t.graphemes(true).count() > 1;
         let mark = if sup { "^" } else { "_" };
-        let open = if multi { format!("{mark}(") } else { mark.to_string() };
+        let open = if multi {
+            format!("{mark}(")
+        } else {
+            mark.to_string()
+        };
         para.push_text(&open, &ts, crate::style::Transform::None);
         self.flow(el, st, out, frame, para);
         if multi {
@@ -939,26 +1109,57 @@ impl Walker<'_> {
     }
 
     fn hint(&mut self, el: ElementRef, st: &Computed, para: &mut Para) {
-        let Some(h) = self.hint_anchors.get(&el.id()) else { return };
+        let Some(h) = self.hint_anchors.get(&el.id()) else {
+            return;
+        };
         let (key, label, expanded) = (h.key.clone(), h.label.clone(), h.expanded);
-        let idx = self.add_widget(key, WidgetKind::Hint { label: label.clone(), expanded });
+        let idx = self.add_widget(
+            key,
+            WidgetKind::Hint {
+                label: label.clone(),
+                expanded,
+            },
+        );
         let mut ts = self.tstyle(st);
         ts.meta.widget = Some(idx);
         ts.meta.link = None;
         ts.ws = WhiteSpace::Normal;
         let arrow = if expanded { "▾" } else { "▸" };
-        para.push_text(&format!("{arrow}\u{a0}{label}"), &ts, crate::style::Transform::None);
+        para.push_text(
+            &format!("{arrow}\u{a0}{label}"),
+            &ts,
+            crate::style::Transform::None,
+        );
     }
 
     fn details(&mut self, el: ElementRef, st: &Computed, out: &mut Out, frame: Frame) {
-        let key = self.details_keys.get(&el.id()).cloned().unwrap_or_else(|| "details:?".into());
+        let key = self
+            .details_keys
+            .get(&el.id())
+            .cloned()
+            .unwrap_or_else(|| "details:?".into());
         let expanded = self.opts.expanded.contains(&key) || el.value().attr("open").is_some();
-        let summary_el = el.children().filter_map(ElementRef::wrap).find(|c| c.value().name() == "summary");
+        let summary_el = el
+            .children()
+            .filter_map(ElementRef::wrap)
+            .find(|c| c.value().name() == "summary");
         let label = summary_el
-            .map(|s| s.text().collect::<String>().split_whitespace().collect::<Vec<_>>().join(" "))
+            .map(|s| {
+                s.text()
+                    .collect::<String>()
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "Details".to_string());
-        let idx = self.add_widget(key, WidgetKind::Details { summary: label.clone(), expanded });
+        let idx = self.add_widget(
+            key,
+            WidgetKind::Details {
+                summary: label.clone(),
+                expanded,
+            },
+        );
         let saved = self.cur_widget.replace(idx);
         let mut para = Self::new_para(st);
         let arrow = if expanded { "▾\u{a0}" } else { "▸\u{a0}" };
@@ -971,7 +1172,11 @@ impl Walker<'_> {
             }
             None => {
                 let ts = self.tstyle(st);
-                para.push_text(&format!("{arrow}{label}"), &ts, crate::style::Transform::None);
+                para.push_text(
+                    &format!("{arrow}{label}"),
+                    &ts,
+                    crate::style::Transform::None,
+                );
             }
         }
         self.flush(&mut para, out, frame);
@@ -995,7 +1200,12 @@ impl Walker<'_> {
 
     // ---- tables ----
 
-    fn table_row<'d>(&self, tr: ElementRef<'d>, trst: &Computed, frame: Frame) -> Vec<(ElementRef<'d>, Computed)> {
+    fn table_row<'d>(
+        &self,
+        tr: ElementRef<'d>,
+        trst: &Computed,
+        frame: Frame,
+    ) -> Vec<(ElementRef<'d>, Computed)> {
         let mut cells = Vec::new();
         for c in tr.children().filter_map(ElementRef::wrap) {
             let cst = self.compute(c, trst, frame);
@@ -1012,7 +1222,10 @@ impl Walker<'_> {
         el: ElementRef<'d>,
         st: &Computed,
         frame: Frame,
-    ) -> (Vec<Vec<(ElementRef<'d>, Computed)>>, Vec<(ElementRef<'d>, Computed)>) {
+    ) -> (
+        Vec<Vec<(ElementRef<'d>, Computed)>>,
+        Vec<(ElementRef<'d>, Computed)>,
+    ) {
         let mut rows = Vec::new();
         let mut captions = Vec::new();
         for child in el.children().filter_map(ElementRef::wrap) {
@@ -1068,7 +1281,13 @@ impl Walker<'_> {
                     },
                     ..Meta::default()
                 };
-                out.emit(vec![ISpan { text: "┄".repeat(frame.width.min(20)), meta }], frame.col);
+                out.emit(
+                    vec![ISpan {
+                        text: "┄".repeat(frame.width.min(20)),
+                        meta,
+                    }],
+                    frame.col,
+                );
             }
             for (c, cst) in row {
                 self.block_content(*c, cst, out, frame);
@@ -1076,7 +1295,14 @@ impl Walker<'_> {
         }
     }
 
-    fn table(&mut self, el: ElementRef, st: &Computed, out: &mut Out, frame: Frame, parent_align: Align) {
+    fn table(
+        &mut self,
+        el: ElementRef,
+        st: &Computed,
+        out: &mut Out,
+        frame: Frame,
+        parent_align: Align,
+    ) {
         let (rows, captions) = self.table_rows(el, st, frame);
         for (c, cst) in &captions {
             self.block_content(*c, cst, out, frame);
@@ -1092,7 +1318,10 @@ impl Walker<'_> {
         }
         let nrows = rows.len();
         let span_attr = |e: &ElementRef, a: &str| -> usize {
-            e.value().attr(a).and_then(|v| v.trim().parse::<usize>().ok()).unwrap_or(1)
+            e.value()
+                .attr(a)
+                .and_then(|v| v.trim().parse::<usize>().ok())
+                .unwrap_or(1)
         };
         let mut occupied: Vec<Vec<bool>> = vec![Vec::new(); nrows];
         let mut cells: Vec<Cell> = Vec::new();
@@ -1116,7 +1345,14 @@ impl Walker<'_> {
                         *o = true;
                     }
                 }
-                cells.push(Cell { el, st, row: r, col: c, colspan, rowspan });
+                cells.push(Cell {
+                    el,
+                    st,
+                    row: r,
+                    col: c,
+                    colspan,
+                    rowspan,
+                });
                 c += colspan;
             }
         }
@@ -1173,7 +1409,7 @@ impl Walker<'_> {
             let mut w: Vec<usize> = colmin
                 .iter()
                 .zip(&colmax)
-                .map(|(mn, mx)| mn + if flex == 0 { 0 } else { (mx - mn) * extra / flex })
+                .map(|(mn, mx)| mn + ((mx - mn) * extra).checked_div(flex).unwrap_or(0))
                 .collect();
             let mut left = avail - w.iter().sum::<usize>();
             for (i, wi) in w.iter_mut().enumerate() {
@@ -1188,7 +1424,10 @@ impl Walker<'_> {
             w
         } else {
             // Even min-content does not fit: share the space by min-content.
-            let mut w: Vec<usize> = colmin.iter().map(|mn| (mn * avail / sum_min.max(1)).max(1)).collect();
+            let mut w: Vec<usize> = colmin
+                .iter()
+                .map(|mn| (mn * avail / sum_min.max(1)).max(1))
+                .collect();
             while w.iter().sum::<usize>() > avail {
                 if let Some(m) = w.iter_mut().max() {
                     *m -= 1;
@@ -1214,7 +1453,11 @@ impl Walker<'_> {
         }
         for (cell, rows) in cells.iter().zip(&contents) {
             if cell.rowspan > 1 {
-                let have: usize = heights[cell.row..cell.row + cell.rowspan].iter().sum::<usize>() + cell.rowspan - 1;
+                let have: usize = heights[cell.row..cell.row + cell.rowspan]
+                    .iter()
+                    .sum::<usize>()
+                    + cell.rowspan
+                    - 1;
                 if rows.len() > have {
                     heights[cell.row + cell.rowspan - 1] += rows.len() - have;
                 }
@@ -1240,7 +1483,7 @@ impl Walker<'_> {
             }
         }
         for &(r, c, rs, cs) in &rects {
-            let (x0, x1, y0, y1) = (xs[c], xs[c + cs] , ys[r], ys[r + rs]);
+            let (x0, x1, y0, y1) = (xs[c], xs[c + cs], ys[r], ys[r + rs]);
             canvas.hline(y0, x0, x1);
             canvas.hline(y1, x0, x1);
             canvas.vline(x0, y0, y1);
@@ -1257,10 +1500,18 @@ impl Walker<'_> {
         let table_rows = canvas.into_rows();
         let free = frame.width.saturating_sub(total_w);
         let centred = parent_align == Align::WebkitCenter
-            || el.value().attr("align").is_some_and(|a| a.eq_ignore_ascii_case("center"));
+            || el
+                .value()
+                .attr("align")
+                .is_some_and(|a| a.eq_ignore_ascii_case("center"));
         let pad = if centred {
             free / 2
-        } else if el.value().attr("align").is_some_and(|a| a.eq_ignore_ascii_case("right")) || st.rtl {
+        } else if el
+            .value()
+            .attr("align")
+            .is_some_and(|a| a.eq_ignore_ascii_case("right"))
+            || st.rtl
+        {
             free
         } else {
             0
@@ -1323,7 +1574,11 @@ impl Walker<'_> {
                 };
                 col += w;
                 match line.spans.last_mut() {
-                    Some(last) if last.style == span.style && last.link == span.link && last.widget == span.widget => {
+                    Some(last)
+                        if last.style == span.style
+                            && last.link == span.link
+                            && last.widget == span.widget =>
+                    {
                         last.text.push_str(&span.text)
                     }
                     _ => line.spans.push(span),
@@ -1367,7 +1622,7 @@ impl Walker<'_> {
                 s.widget = s.widget.and_then(|w| remap[w]);
             }
         }
-        let images = self
+        let images: Vec<ImageBlock> = self
             .images
             .into_iter()
             .zip(image_pos)
@@ -1383,8 +1638,14 @@ impl Walker<'_> {
                 })
             })
             .collect();
-        // No trailing blank lines.
-        while lines.last().is_some_and(|l| l.spans.is_empty()) && lines.len() > out.answer_row.map_or(0, |a| a + 1) {
+        // Blank image cells are meaningful layout, including at the card's end.
+        let reserved_rows = images
+            .iter()
+            .map(|image| image.row + image.height as usize)
+            .max()
+            .unwrap_or(0);
+        let keep_rows = reserved_rows.max(out.answer_row.map_or(0, |a| a + 1));
+        while lines.last().is_some_and(|l| l.spans.is_empty()) && lines.len() > keep_rows {
             lines.pop();
         }
         RenderedCard {
@@ -1399,8 +1660,16 @@ impl Walker<'_> {
 
 /// Indent a list adds for its markers.
 fn list_indent(el: ElementRef, st: &Computed) -> usize {
-    let count = el.children().filter_map(ElementRef::wrap).filter(|c| c.value().name() == "li").count();
-    let start = el.value().attr("start").and_then(|s| s.trim().parse::<i64>().ok()).unwrap_or(1);
+    let count = el
+        .children()
+        .filter_map(ElementRef::wrap)
+        .filter(|c| c.value().name() == "li")
+        .count();
+    let start = el
+        .value()
+        .attr("start")
+        .and_then(|s| s.trim().parse::<i64>().ok())
+        .unwrap_or(1);
     let last = (start + count as i64 - 1).max(1) as usize;
     let widest = marker_text(&st.list_style, last.max(1));
     str_width(&widest).max(2)
@@ -1432,12 +1701,20 @@ fn list_marker(el: ElementRef, st: &Computed) -> String {
             continue;
         }
         n += 1;
-        if let Some(v) = sib.value().attr("value").and_then(|v| v.trim().parse::<i64>().ok()) {
+        if let Some(v) = sib
+            .value()
+            .attr("value")
+            .and_then(|v| v.trim().parse::<i64>().ok())
+        {
             base = Some(v);
             break;
         }
     }
-    let ordinal = if let Some(v) = el.value().attr("value").and_then(|v| v.trim().parse::<i64>().ok()) {
+    let ordinal = if let Some(v) = el
+        .value()
+        .attr("value")
+        .and_then(|v| v.trim().parse::<i64>().ok())
+    {
         v
     } else if let Some(b) = base {
         b + n
@@ -1517,7 +1794,9 @@ impl Canvas {
     }
 
     fn blit(&mut self, x: usize, y: usize, w: usize, row: IRow) {
-        let Some(line) = self.cells.get_mut(y) else { return };
+        let Some(line) = self.cells.get_mut(y) else {
+            return;
+        };
         let mut cx = x;
         for s in row {
             for g in s.text.graphemes(true) {

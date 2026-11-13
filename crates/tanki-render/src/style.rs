@@ -2,7 +2,9 @@
 //! inline `style=""` and presentational attributes, for the whitelist of
 //! properties the text tier honours (PLAN 6.2, R3 §8.1 step 5).
 
-use crate::css::{self, parse_color, parse_declarations, CssColor, Declaration, Origin, RightKey, StyleSheet};
+use crate::css::{
+    self, parse_color, parse_declarations, CssColor, Declaration, Origin, RightKey, StyleSheet,
+};
 use crate::Rgb;
 use scraper::{CaseSensitivity, ElementRef};
 use std::collections::HashMap;
@@ -56,8 +58,13 @@ nobr { white-space: nowrap }
 textarea { white-space: pre-wrap }
 
 hr { margin: 1em 0 }
-body.nightMode { color: -tanki-default; background-color: -tanki-default }
 pre { text-align: left }
+"#;
+
+/// Desktop reviewer rules share the author origin with note-type CSS. In
+/// particular `body.nightMode` must beat the stock `.card` colour by specificity.
+pub const REVIEWER_CSS: &str = r#"
+body.nightMode { color: -tanki-default; background-color: -tanki-default }
 code#typeans { white-space: pre-wrap }
 .typeGood { background: #afa; color: black }
 .typeBad { color: black; background: #faa }
@@ -102,10 +109,16 @@ pub enum WhiteSpace {
 
 impl WhiteSpace {
     pub fn collapses_spaces(self) -> bool {
-        matches!(self, WhiteSpace::Normal | WhiteSpace::NoWrap | WhiteSpace::PreLine)
+        matches!(
+            self,
+            WhiteSpace::Normal | WhiteSpace::NoWrap | WhiteSpace::PreLine
+        )
     }
     pub fn keeps_newlines(self) -> bool {
-        matches!(self, WhiteSpace::Pre | WhiteSpace::PreWrap | WhiteSpace::PreLine)
+        matches!(
+            self,
+            WhiteSpace::Pre | WhiteSpace::PreWrap | WhiteSpace::PreLine
+        )
     }
     pub fn wraps(self) -> bool {
         !matches!(self, WhiteSpace::NoWrap | WhiteSpace::Pre)
@@ -274,7 +287,11 @@ struct Applied<'a> {
 }
 
 fn blend(fg: (u8, u8, u8), a: f32, bg: Rgb) -> Rgb {
-    let m = |f: u8, b: u8| (f as f32 * a + b as f32 * (1.0 - a)).round().clamp(0.0, 255.0) as u8;
+    let m = |f: u8, b: u8| {
+        (f as f32 * a + b as f32 * (1.0 - a))
+            .round()
+            .clamp(0.0, 255.0) as u8
+    };
     Rgb(m(fg.0, bg.0), m(fg.1, bg.1), m(fg.2, bg.2))
 }
 
@@ -314,7 +331,11 @@ fn substitute_vars(value: &str, vars: &HashMap<String, String>, depth: u32) -> S
         } else if let Some(f) = fallback {
             out.push_str(&substitute_vars(f, vars, depth + 1));
         }
-        rest = if end < after.len() { &after[end + 1..] } else { "" };
+        rest = if end < after.len() {
+            &after[end + 1..]
+        } else {
+            ""
+        };
     }
     out.push_str(rest);
     out
@@ -323,14 +344,21 @@ fn substitute_vars(value: &str, vars: &HashMap<String, String>, depth: u32) -> S
 fn parse_len(v: &str, em_px: f32) -> Option<Len> {
     let v = v.trim();
     if let Some(p) = v.strip_suffix('%') {
-        return p.trim().parse::<f32>().ok().filter(|x| x.is_finite()).map(Len::Percent);
+        return p
+            .trim()
+            .parse::<f32>()
+            .ok()
+            .filter(|x| x.is_finite())
+            .map(Len::Percent);
     }
     css::parse_length_px(v, em_px).map(Len::Px)
 }
 
 fn parse_list_style(v: &str) -> Option<ListStyle> {
     let t = v.trim();
-    if (t.starts_with('"') && t.ends_with('"') || t.starts_with('\'') && t.ends_with('\'')) && t.len() >= 2 {
+    if (t.starts_with('"') && t.ends_with('"') || t.starts_with('\'') && t.ends_with('\''))
+        && t.len() >= 2
+    {
         return Some(ListStyle::Text(t[1..t.len() - 1].to_string()));
     }
     Some(match t.to_ascii_lowercase().as_str() {
@@ -482,12 +510,16 @@ impl Styler {
                     c.display = match kw.split_whitespace().next().unwrap_or("") {
                         "none" => Display::None,
                         "block" | "flow-root" | "flow" => Display::Block,
-                        "inline" | "inline-block" | "inline-table" | "ruby" | "ruby-base" => Display::Inline,
+                        "inline" | "inline-block" | "inline-table" | "ruby" | "ruby-base" => {
+                            Display::Inline
+                        }
                         "list-item" => Display::ListItem,
                         "table" => Display::Table,
                         "table-row" => Display::TableRow,
                         "table-cell" => Display::TableCell,
-                        "table-row-group" | "table-header-group" | "table-footer-group" => Display::TableRowGroup,
+                        "table-row-group" | "table-header-group" | "table-footer-group" => {
+                            Display::TableRowGroup
+                        }
                         "table-caption" => Display::TableCaption,
                         "table-column" | "table-column-group" => Display::TableColumn,
                         "contents" => Display::Contents,
@@ -552,13 +584,19 @@ impl Styler {
                 }
                 "font" => {
                     let words: Vec<&str> = kw.split_whitespace().collect();
-                    c.bold = words.iter().any(|w| *w == "bold" || *w == "bolder" || w.parse::<u32>().is_ok_and(|n| n >= 600 && n <= 1000));
+                    c.bold = words.iter().any(|w| {
+                        *w == "bold"
+                            || *w == "bolder"
+                            || w.parse::<u32>().is_ok_and(|n| (600..=1000).contains(&n))
+                    });
                     c.italic = words.iter().any(|w| *w == "italic" || *w == "oblique");
                     for w in &words {
                         let size = w.split('/').next().unwrap_or("");
-                        if let Some(px) = font_size_keyword(size, parent.font_px)
-                            .or_else(|| css::parse_length_px(size, parent.font_px).filter(|_| size.ends_with("px") || size.ends_with("em") || size.ends_with("pt")))
-                        {
+                        if let Some(px) = font_size_keyword(size, parent.font_px).or_else(|| {
+                            css::parse_length_px(size, parent.font_px).filter(|_| {
+                                size.ends_with("px") || size.ends_with("em") || size.ends_with("pt")
+                            })
+                        }) {
                             font_px = px;
                         }
                     }
@@ -660,11 +698,7 @@ impl Styler {
                         _ => c.transform,
                     }
                 }
-                "position" => {
-                    if kw == "absolute" || kw == "fixed" {
-                        c.fancy_layout = true;
-                    }
-                }
+                "position" if kw == "absolute" || kw == "fixed" => c.fancy_layout = true,
                 _ => {}
             }
         }
@@ -712,9 +746,8 @@ impl Styler {
         c.margin_bottom = self.v_rows(mb.flatten());
 
         if let Some(dir) = e.attr("dir") {
-            match dir.trim().to_ascii_lowercase().as_str() {
-                "auto" => c.dir_auto = true,
-                _ => {}
+            if dir.trim().eq_ignore_ascii_case("auto") {
+                c.dir_auto = true;
             }
         }
         c
@@ -760,7 +793,24 @@ fn presentational_hints(el: ElementRef) -> Vec<Declaration> {
         out.push(decl("background-color", c));
     }
     if let Some(a) = e.attr("align") {
-        if matches!(tag, "div" | "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "td" | "th" | "tr" | "tbody" | "thead" | "tfoot" | "caption") {
+        if matches!(
+            tag,
+            "div"
+                | "p"
+                | "h1"
+                | "h2"
+                | "h3"
+                | "h4"
+                | "h5"
+                | "h6"
+                | "td"
+                | "th"
+                | "tr"
+                | "tbody"
+                | "thead"
+                | "tfoot"
+                | "caption"
+        ) {
             let v = match a.trim().to_ascii_lowercase().as_str() {
                 "center" | "middle" => "-webkit-center",
                 "left" => "-webkit-left",
