@@ -20,6 +20,10 @@ use unicode_width::UnicodeWidthStr;
 // ---- card rendering ---------------------------------------------------------
 
 pub trait CardRenderer {
+    /// Frame hooks used by decorators that carry metadata outside cell text.
+    fn begin_frame(&self) {}
+    fn obscure_links(&self, _area: Rect) {}
+    fn finish_frame(&self, _buffer: &Buffer, _links_visible: bool) {}
     fn render(&self, side: &CardSide, options: &RenderOptions) -> RenderedCard;
     fn paint(&self, card: &RenderedCard, scroll: usize, area: Rect, buf: &mut Buffer);
 }

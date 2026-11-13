@@ -2,6 +2,7 @@
 //! input reader. Both the reader and raw terminal are joined/restored on error.
 use crate::app::{App, AppEvent, Profile, Services, Start};
 use crate::keymap::Keymap;
+use crate::links::{HyperlinkBackend, LinkedRenderer, Links};
 use crate::reviewer::Now;
 use crate::services::{AnkiRenderer, Display, MediaAudio, TermImages};
 use crossterm::cursor::Show;
@@ -14,7 +15,7 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use crossterm::{execute, queue};
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::Terminal;
 use std::io::{self, IsTerminal, Write};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -71,8 +72,9 @@ pub fn run(actor: &CollectionActor, options: Options) -> io::Result<()> {
         dir: actor.profile_dir().to_path_buf(),
         media_dir: actor.media_dir(),
     };
+    let links = Links::default();
     let services = Services {
-        renderer: Box::new(AnkiRenderer),
+        renderer: Box::new(LinkedRenderer::new(AnkiRenderer, links.clone())),
         images: Box::new(images),
         audio: Box::new(MediaAudio { audio }),
         display: Display::from_capabilities(&capabilities),
@@ -81,7 +83,7 @@ pub fn run(actor: &CollectionActor, options: Options) -> io::Result<()> {
     let mut app = App::new(actor, services, profile, options.start, Now::current());
     app.set_keymap(options.keymap);
     let _session = Session::enter(&capabilities)?;
-    let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+    let mut terminal = Terminal::new(HyperlinkBackend::new(io::stdout(), links))?;
     terminal.clear()?;
     let reader = Reader::start()?;
     let result = (|| {
