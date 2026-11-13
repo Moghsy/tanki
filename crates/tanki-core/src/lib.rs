@@ -3,6 +3,7 @@
 mod actor;
 mod fixture;
 mod safety;
+mod study;
 mod sync;
 mod types;
 pub use actor::CollectionActor;
