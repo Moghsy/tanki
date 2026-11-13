@@ -338,3 +338,53 @@ fn paint_clears_old_foreground_and_scrolls_inside_area() {
     assert_eq!(buf[(5, 1)].bg, Color::Blue);
     assert_eq!(buf[(0, 0)].symbol(), "x");
 }
+
+#[test]
+fn terminal_controls_never_reach_text_cells() {
+    // Para::push_text already strips terminal controls after consuming the
+    // whitespace used for layout; HTML parsing alone is not the safety boundary.
+    let card = render(
+        &side("<p>hello\x1b[2Jworld\x07</p>", ""),
+        &RenderOptions::default(),
+    );
+    assert!(card
+        .lines
+        .iter()
+        .flat_map(|l| &l.spans)
+        .all(|s| !s.text.chars().any(char::is_control)));
+    assert_eq!(plain(&card).trim(), "hello[2Jworld");
+
+    let controls: String = ('\u{1}'..='\u{9f}')
+        .filter(|c| c.is_control() && !matches!(c, '\t' | '\n' | '\r'))
+        .collect();
+    let card = render(
+        &side(&format!("<div>before{controls}after</div>"), ""),
+        &RenderOptions::default(),
+    );
+    assert!(card
+        .lines
+        .iter()
+        .flat_map(|l| &l.spans)
+        .all(|s| !s.text.chars().any(char::is_control)));
+    let area = Rect::new(0, 0, 80, card.lines.len() as u16);
+    let mut buffer = Buffer::empty(area);
+    paint(&card, 0, area, &mut buffer);
+    assert!(buffer
+        .content
+        .iter()
+        .all(|c| !c.symbol().chars().any(char::is_control)));
+
+    // Layout consumes tabs and line breaks; Unicode format/combining characters
+    // are not terminal controls and must survive in the resulting graphemes.
+    let card = render(
+        &side("<pre>A\tB\nC e\u{301} 👨‍👩‍👧‍👦</pre>", ""),
+        &RenderOptions::default(),
+    );
+    assert_eq!(card.lines.len(), 2);
+    assert!(plain(&card).starts_with("A       B\nC e\u{301} 👨‍👩‍👧‍👦"));
+    assert!(card
+        .lines
+        .iter()
+        .flat_map(|l| &l.spans)
+        .all(|s| !s.text.chars().any(char::is_control)));
+}
