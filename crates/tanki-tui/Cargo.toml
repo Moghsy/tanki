@@ -4,3 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
+
+[dependencies]
+tanki-core = { path = "../tanki-core" }
+tanki-render = { path = "../tanki-render" }
+tanki-term = { path = "../tanki-term" }
+tanki-media = { path = "../tanki-media" }
+ratatui.workspace = true
+crossterm.workspace = true

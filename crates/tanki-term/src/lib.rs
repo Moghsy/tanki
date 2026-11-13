@@ -25,6 +25,92 @@ pub trait TerminalDoctor {
     fn run(&mut self, options: &DoctorOptions) -> io::Result<DoctorReport>;
 }
 
+// ---------------------------------------------------------------------------
+// Phase 1 interface (fixed in the "agree first" step; the terminal stream may
+// add items, changing these needs the lead).
+
+/// What the startup probe found (PLAN 5.2). Values the terminal did not
+/// answer are `None`/`false`; nothing is inferred from environment variables
+/// except the transport hints the probe already uses.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Capabilities {
+    /// The mode in use: the `--graphics` override, else the detected mode.
+    pub graphics: GraphicsMode,
+    /// What auto-detection chose (never `Auto`).
+    pub detected: GraphicsMode,
+    /// Cell size in pixels `(width, height)`.
+    pub cell_px: Option<(u16, u16)>,
+    /// Default background and foreground colours (OSC 11 / OSC 10).
+    pub background: Option<(u8, u8, u8)>,
+    pub foreground: Option<(u8, u8, u8)>,
+    /// Kitty keyboard protocol available.
+    pub keyboard_enhancement: bool,
+    /// DECSET 2026 synchronized output available.
+    pub synchronized_output: bool,
+    /// XTVERSION reply.
+    pub version: Option<String>,
+    /// Running inside tmux (DCS passthrough needed).
+    pub tmux: bool,
+}
+
+impl Capabilities {
+    /// Dark background, judged from `background` luminance; `None` if unknown.
+    pub fn dark(&self) -> Option<bool> {
+        self.background
+            .map(|(r, g, b)| (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32) < 128.0)
+    }
+}
+
+/// Queries the terminal once (raw mode, DA1 sentinel). Call before any event
+/// reader starts. When stdin/stdout are not terminals, returns defaults with
+/// `graphics` = the override or `None`.
+pub fn probe(requested: GraphicsMode) -> io::Result<Capabilities> {
+    let _ = requested;
+    unimplemented!("terminal stream")
+}
+
+/// Image display for the TUI through ratatui-image: kitty Unicode
+/// placeholders, iTerm2, Sixel and half-blocks (PLAN 5.1, 5.2).
+pub struct Images {
+    _private: (),
+}
+
+impl Images {
+    pub fn new(capabilities: &Capabilities) -> Self {
+        let _ = capabilities;
+        unimplemented!("terminal stream")
+    }
+    pub fn mode(&self) -> GraphicsMode {
+        unimplemented!("terminal stream")
+    }
+    /// Switches protocol live; drops cached encodings.
+    pub fn set_mode(&mut self, mode: GraphicsMode) {
+        let _ = mode;
+        unimplemented!("terminal stream")
+    }
+    /// Next mode in the order Kitty, Iterm, Sixel, Blocks, None; returns it.
+    pub fn cycle(&mut self) -> GraphicsMode {
+        unimplemented!("terminal stream")
+    }
+    /// Draws `image` scaled to fit `area` (aspect kept). `key` identifies the
+    /// image so the encoded form is reused across frames while the key,
+    /// area size and mode stay the same. `GraphicsMode::None` draws nothing.
+    pub fn render(
+        &mut self,
+        key: u64,
+        image: &image::DynamicImage,
+        area: ratatui::layout::Rect,
+        buf: &mut ratatui::buffer::Buffer,
+    ) {
+        let _ = (key, image, area, buf);
+        unimplemented!("terminal stream")
+    }
+    /// Forgets all encoded images and placements (call on screen change).
+    pub fn clear(&mut self) {
+        unimplemented!("terminal stream")
+    }
+}
+
 use std::io::{IsTerminal, Read, Write};
 use std::time::{Duration, Instant};
 
@@ -89,7 +175,7 @@ fn query(hints: &Hints) -> String {
 }
 
 #[derive(Default)]
-struct Capabilities {
+struct Replies {
     kitty: bool,
     sixel: bool,
     version: Option<String>,
@@ -101,11 +187,11 @@ struct Capabilities {
     sentinel: bool,
 }
 
-fn parse(data: &[u8]) -> Capabilities {
+fn parse(data: &[u8]) -> Replies {
     let s = String::from_utf8_lossy(data);
-    let mut c = Capabilities {
+    let mut c = Replies {
         kitty: s.contains("\x1b_Gi=31;OK\x1b\\"),
-        ..Capabilities::default()
+        ..Replies::default()
     };
     if let Some(rest) = s.split("\x1bP>|").nth(1) {
         c.version = rest
@@ -169,7 +255,7 @@ fn parse(data: &[u8]) -> Capabilities {
     c
 }
 
-fn select(requested: GraphicsMode, c: &Capabilities) -> GraphicsMode {
+fn select(requested: GraphicsMode, c: &Replies) -> GraphicsMode {
     if requested != GraphicsMode::Auto {
         requested
     } else if c.kitty {
@@ -185,7 +271,7 @@ fn display_value(v: &Option<String>) -> &str {
     v.as_deref().unwrap_or("unanswered")
 }
 
-fn summary(c: &Capabilities, mode: GraphicsMode, hints: &Hints) -> String {
+fn summary(c: &Replies, mode: GraphicsMode, hints: &Hints) -> String {
     format!("Graphics: {mode:?} (kitty query: {}, sixel DA1: {})\nXTVERSION: {}\nCell pixels (height;width): {}\nText area pixels (height;width): {}\nKitty keyboard flags: {}\nBackground: {}\nMode replies (0=unrecognized, 1=set, 2=reset, 3/4=permanent): sync={}, theme={}, clipboard={}, pixel mouse={}\nDA1 sentinel: {}\nEnvironment hints: TERM={:?}, TERM_PROGRAM={:?}, TMUX={:?}, HERDR_ENV={:?}\nKitty uses direct placement; iTerm2 is not auto-detected. Image display requires visual confirmation.",
         if c.kitty { "supported" } else { "unconfirmed" }, if c.sixel { "supported" } else { "unconfirmed" },
         display_value(&c.version), display_value(&c.cell), display_value(&c.area), display_value(&c.keyboard), display_value(&c.background),
@@ -304,7 +390,7 @@ mod tests {
     }
     #[test]
     fn chooses_and_overrides() {
-        let mut c = Capabilities::default();
+        let mut c = Replies::default();
         assert_eq!(select(GraphicsMode::Auto, &c), GraphicsMode::Blocks);
         c.sixel = true;
         assert_eq!(select(GraphicsMode::Auto, &c), GraphicsMode::Sixel);

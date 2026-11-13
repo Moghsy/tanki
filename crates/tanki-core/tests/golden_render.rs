@@ -183,6 +183,7 @@ fn render_with(col: &mut Collection, card_id: i64, partial_render: bool) -> Rend
                 css: String::new(),
                 question_audio: vec![],
                 answer_audio: vec![],
+                ..Default::default()
             };
         }
         Err(e) => panic!("render {card_id}: {e}"),
@@ -272,6 +273,7 @@ fn render_with(col: &mut Collection, card_id: i64, partial_render: bool) -> Rend
         css: r.css,
         question_audio: audio(q.av_tags),
         answer_audio: audio(a.av_tags),
+        ..Default::default()
     }
 }
 

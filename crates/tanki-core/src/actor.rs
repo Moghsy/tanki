@@ -16,6 +16,7 @@ use std::{
 
 type Request = (Command, mpsc::Sender<Result<Response>>);
 pub struct CollectionActor {
+    profile: std::path::PathBuf,
     sender: Option<mpsc::Sender<Request>>,
     worker: Option<thread::JoinHandle<Result<()>>>,
     subscribers: Arc<Mutex<Vec<mpsc::Sender<OpChanges>>>>,
@@ -46,7 +47,7 @@ impl CollectionActor {
                 })();
                 let (mut col, profile) = match opened {
                     Ok(value) => {
-                        let _ = ready_tx.send(Ok(()));
+                        let _ = ready_tx.send(Ok(value.1.clone()));
                         value
                     }
                     Err(e) => {
@@ -72,9 +73,7 @@ impl CollectionActor {
                         continue;
                     }
                     let result = execute(&mut col, command, &mut queued);
-                    if let Ok(Response::Changes(changes) | Response::NoteAdded { changes, .. }) =
-                        &result
-                    {
+                    if let Some(changes) = result.as_ref().ok().and_then(Response::changes) {
                         subs.lock()
                             .unwrap()
                             .retain(|sub| sub.send(changes.clone()).is_ok());
@@ -89,7 +88,8 @@ impl CollectionActor {
                 saved.and(closed)
             })?;
         match ready_rx.recv().map_err(|_| CoreError::ActorStopped)? {
-            Ok(()) => Ok(Self {
+            Ok(profile) => Ok(Self {
+                profile,
                 sender: Some(sender),
                 worker: Some(worker),
                 subscribers,
@@ -108,6 +108,14 @@ impl CollectionActor {
             .send((command, tx))
             .map_err(|_| CoreError::ActorStopped)?;
         rx.recv().map_err(|_| CoreError::ActorStopped)?
+    }
+    /// The validated, canonical profile folder.
+    pub fn profile_dir(&self) -> &Path {
+        &self.profile
+    }
+    /// `<profile>/collection.media`, where card media resolves.
+    pub fn media_dir(&self) -> std::path::PathBuf {
+        self.profile.join("collection.media")
     }
     pub fn subscribe(&self) -> mpsc::Receiver<OpChanges> {
         let (tx, rx) = mpsc::channel();
@@ -219,6 +227,9 @@ fn deck(d: pb::decks::DeckTreeNode) -> Deck {
         learning: d.learn_count,
         review: d.review_count,
         children: d.children.into_iter().map(deck).collect(),
+        level: d.level,
+        collapsed: d.collapsed,
+        filtered: d.filtered,
     }
 }
 fn execute(
@@ -256,9 +267,19 @@ fn execute(
                     .map(|s| anki_i18n::without_unicode_isolation(&s).to_string())
                     .collect();
                 queued.insert(card.id, states);
+                let queue = match pb::scheduler::queued_cards::Queue::try_from(c.queue) {
+                    Ok(pb::scheduler::queued_cards::Queue::Learning) => QueueKind::Learning,
+                    Ok(pb::scheduler::queued_cards::Queue::Review) => QueueKind::Review,
+                    _ => QueueKind::New,
+                };
                 cards.push(QueuedCard {
                     id: card.id,
                     intervals,
+                    note_id: card.note_id,
+                    deck_id: card.deck_id,
+                    queue,
+                    flag: card.flags as u8 & 0b111,
+                    marked: false,
                 });
             }
             Response::Queue(Queue {
@@ -283,21 +304,28 @@ fn execute(
                 Rating::Good => (state.good, 2),
                 Rating::Easy => (state.easy, 3),
             };
-            Response::Changes(changes(SchedulerService::answer_card(
-                col,
-                pb::scheduler::CardAnswer {
-                    card_id,
-                    current_state: state.current,
-                    new_state,
-                    rating,
-                    answered_at_millis,
-                    milliseconds_taken,
-                },
-            )?))
+            Response::Answered(AnswerOutcome {
+                changes: changes(SchedulerService::answer_card(
+                    col,
+                    pb::scheduler::CardAnswer {
+                        card_id,
+                        current_state: state.current,
+                        new_state,
+                        rating,
+                        answered_at_millis,
+                        milliseconds_taken,
+                    },
+                )?),
+                ..Default::default()
+            })
         }
-        Command::Undo => Response::Changes(changes(
-            CollectionService::undo(col)?.changes.unwrap_or_default(),
-        )),
+        Command::Undo => {
+            let undone = CollectionService::undo(col)?;
+            Response::Undone {
+                changes: changes(undone.changes.unwrap_or_default()),
+                label: undone.operation,
+            }
+        }
         Command::Render { card_id } => Response::Rendered(render(col, card_id)?),
         Command::Search { query } => Response::CardIds(
             SearchService::search_cards(
@@ -351,6 +379,12 @@ fn execute(
             return Err(CoreError::Invalid(
                 "Backup is handled by the actor loop".into(),
             ))
+        }
+        // Phase 1 core stream implements these.
+        command => {
+            return Err(CoreError::Invalid(format!(
+                "Not implemented yet: {command:?}"
+            )))
         }
     })
 }
@@ -434,6 +468,7 @@ fn render(col: &mut Collection, card_id: i64) -> Result<RenderedCard> {
                 css: String::new(),
                 question_audio: vec![],
                 answer_audio: vec![],
+                ..Default::default()
             });
         }
         Err(e) => return Err(e.into()),
@@ -487,6 +522,7 @@ fn render(col: &mut Collection, card_id: i64) -> Result<RenderedCard> {
         css: r.css,
         question_audio: audio(q.av_tags),
         answer_audio: audio(a.av_tags),
+        ..Default::default()
     })
 }
 
