@@ -645,9 +645,9 @@ Streams (parallel after the interfaces exist):
   - [ ] Image blocks: decode (jpeg, png, gif first frame, webp, svg via resvg), scale to cell pixel size, cache, off-thread.
   - [ ] Snapshot tests for all six stock note types (R3 §6).
 - **Terminal** (`tanki-term`):
-  - [ ] Finish capability probe; ratatui-image integration with Unicode-placeholder, iTerm2, Sixel and half-block modes; `--graphics` override; live mode cycle.
+  - [x] Finish capability probe; ratatui-image integration with Unicode-placeholder, iTerm2, Sixel and half-block modes; `--graphics` override; live mode cycle. (`probe`, `Images`; encoding is synchronous on a cache miss, 10–50 ms per image depending on size. ratatui-image never deletes kitty images, so the TUI writes `Images::take_cleanup()` on screen changes. Inside tmux, ratatui-image runs `tmux set -p allow-passthrough on` for its pane.)
 - **Media** (`tanki-media`):
-  - [ ] Audio queue with Anki's autoplay/replay/interrupt rules; built-in player; mpv IPC backend when present; "no audio device" state.
+  - [x] Audio queue with Anki's autoplay/replay/interrupt rules; built-in player; mpv IPC backend when present; "no audio device" state. (rodio 0.23 with mp3/aac/mp4/alac/flac/vorbis/wav; needs the ALSA headers `libasound2-dev` to build. Text to speech is reported as unsupported until Phase 4.)
 - **TUI/CLI** (`tanki-tui`, `tanki-cli`) — depends on the others' interfaces:
   - [ ] App shell: event loop, status line, keymap with per-screen scopes, command palette, help overlay.
   - [ ] Decks, overview, review, congrats screens; image zoom view; "open card in browser" escape hatch.
