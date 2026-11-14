@@ -95,9 +95,10 @@ pub enum FieldsCheck {
 /// differs from `expected_mtime`, or, when `expected_fields` is given, when
 /// any stored field differs from it (mtime has one-second resolution). Only
 /// the fields listed in `fields` are replaced; the others are passed back to
-/// Anki as stored. Anki itself normalises every field on any write (control
-/// characters other than `\n`/`\t` removed, NFC when `normalize_note_text`),
-/// exactly as desktop's save does.
+/// Anki as stored. Anki itself normalises every field on any write (ASCII
+/// control characters other than `\n`/`\t` removed, so CR goes; NFC when
+/// `normalize_note_text`), exactly as desktop's save does. C1 controls,
+/// U+2028/2029, BOM and zero-width characters are kept.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NoteUpdate {
     pub id: i64,

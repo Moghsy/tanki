@@ -108,3 +108,40 @@ Errors with their own exit code use `NoteCliError { message, code }`;
 - Clipboard images: `arboard` is not in the tree; Phase 3 shells out to
   `wl-paste` / `xclip` when installed (already-installed tools, not
   downloaded binaries), and reports clearly when neither is present.
+
+## Stream results (lead, 2026-11-14)
+
+- **Notes core** (merged): `notes_ops.rs` handles every `NoteCommand` but
+  `UpdateNotes`; `From` conversions between `NoteData` and `pb::notes::Note`
+  live there. `AddMediaFromUrl` uses the public `anki::editor::retrieve_url`
+  on a throwaway current-thread runtime, so a download blocks the actor
+  while it runs. Media link text follows desktop's `fnameToLink`; files
+  that are neither image nor audio/video get the bare name (desktop makes
+  every non-image a `[sound:…]`). `SetSticky` uses `UpdateNotetype` and
+  does not require a full sync (tested).
+- **Notes TUI** (merged): `add_ui` (add and edit-current, editor commands,
+  media attach, live preview, 15-entry session history) and `textarea`.
+  Text colour is stored as `<span style="color: rgb(r, g, b);">` (R7 §2.2,
+  §2.8), not `<font color>`. Tag completion uses a private popup until it
+  is switched to the shared `completion.rs`. Keys use Alt chords where
+  terminals cannot send Ctrl+letter.
+- **Editors core** (merged): note file format (`# Note` blocks, front
+  matter, `## Field` headings, plain HTML bodies; a field that cannot be
+  written plainly switches to `## Name {quoted}` with one JSON string per
+  line, instead of R7 §6.4's fenced proposal). The file survives editors
+  converting to CRLF, stripping trailing whitespace, adding a BOM or blank
+  lines. Existing notes carry no `deck:` (cards may be in several decks).
+  `notefile::plan` builds updates/adds/refusals; `editor_flow::{edit_notes,
+  add_notes, apply_text}` drive the round trip. Adds in an edit session are
+  a second undo step. Corpus: `tests/fixtures/field-corpus/corpus.json`,
+  83 cases.
+- **Anki's field normalisation (pinned source, corpus-tested).**
+  `normalize_field` strips only ASCII control characters other than `\n`
+  and `\t` (so CRLF becomes LF, DEL goes) and applies NFC; C1 controls,
+  U+2028/2029, BOM, zero-width/bidi controls, nbsp and surrounding
+  whitespace are stored as sent. A value differing only in stripped
+  characters is still written (mtime bump), because `note_differs_from_db`
+  compares before normalising. Anki coalesces consecutive single-note
+  updates of the same note within 60 s into one undo step
+  (`notes/undo.rs`), so two editor saves of one note a minute apart undo
+  together.
