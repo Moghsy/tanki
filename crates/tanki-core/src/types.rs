@@ -460,7 +460,8 @@ impl Response {
             Self::Changes(changes)
             | Self::NoteAdded { changes, .. }
             | Self::Undone { changes, .. }
-            | Self::Answered(AnswerOutcome { changes, .. }) => Some(changes),
+            | Self::Answered(AnswerOutcome { changes, .. })
+            | Self::Data(crate::DataResponse::Imported { changes, .. }) => Some(changes),
             _ => None,
         }
     }

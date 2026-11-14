@@ -12,11 +12,41 @@ use std::{
 };
 
 type Request = (Command, mpsc::Sender<Result<Response>>);
+pub(crate) type SharedProgress = Arc<Mutex<anki::progress::ProgressState>>;
 pub struct CollectionActor {
     profile: std::path::PathBuf,
     sender: Option<mpsc::Sender<Request>>,
     worker: Option<thread::JoinHandle<Result<()>>>,
     subscribers: Arc<Mutex<Vec<mpsc::Sender<OpChanges>>>>,
+    progress: SharedProgress,
+    tr: anki_i18n::I18n,
+}
+/// A data operation queued with `CollectionActor::start_data`.
+pub struct PendingOperation {
+    reply: mpsc::Receiver<Result<Response>>,
+}
+impl PendingOperation {
+    /// `Ok(None)` while the actor is still working; poll
+    /// `CollectionActor::progress` meanwhile.
+    pub fn try_recv(&self) -> Result<Option<DataResponse>> {
+        match self.reply.try_recv() {
+            Ok(result) => Ok(Some(data_response(result?)?)),
+            Err(mpsc::TryRecvError::Empty) => Ok(None),
+            Err(mpsc::TryRecvError::Disconnected) => Err(CoreError::ActorStopped),
+        }
+    }
+    /// Blocks until the operation finishes.
+    pub fn wait(self) -> Result<DataResponse> {
+        data_response(self.reply.recv().map_err(|_| CoreError::ActorStopped)??)
+    }
+}
+fn data_response(response: Response) -> Result<DataResponse> {
+    match response {
+        Response::Data(data) => Ok(data),
+        _ => Err(CoreError::Other(
+            "Unexpected response to a data operation".into(),
+        )),
+    }
 }
 impl CollectionActor {
     pub fn open(profile: impl AsRef<Path>) -> Result<Self> {
@@ -25,6 +55,8 @@ impl CollectionActor {
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let subscribers = Arc::new(Mutex::new(Vec::<mpsc::Sender<OpChanges>>::new()));
         let subs = subscribers.clone();
+        let progress = SharedProgress::default();
+        let shared = progress.clone();
         let worker = thread::Builder::new()
             .name("tanki-collection".into())
             .spawn(move || {
@@ -33,9 +65,9 @@ impl CollectionActor {
                     safety::peek_and_backup(&profile)?;
                     std::fs::create_dir_all(profile.join("collection.media"))?;
                     std::fs::create_dir_all(profile.join("backups"))?;
-                    let col = open_collection(&profile)?;
+                    let col = open_collection(&profile, &shared)?;
                     // Backup failure fails the open: no command runs unbacked.
-                    let (col, saved) = backup_and_relock(col, &profile)?;
+                    let (col, saved) = backup_and_relock(col, &profile, &shared)?;
                     if let Err(error) = saved {
                         let _ = col.close(None);
                         return Err(error);
@@ -56,7 +88,7 @@ impl CollectionActor {
                 for (command, reply) in receiver {
                     if matches!(command, Command::Backup) {
                         queued.clear();
-                        match backup_and_relock(col, &profile) {
+                        match backup_and_relock(col, &profile, &shared) {
                             Ok((reopened, saved)) => {
                                 col = reopened;
                                 let _ = reply.send(saved.map(|()| Response::Backup));
@@ -68,6 +100,9 @@ impl CollectionActor {
                             }
                         }
                         continue;
+                    }
+                    if matches!(command, Command::Data(_)) {
+                        shared.lock().unwrap().reset();
                     }
                     let result = execute(&mut col, command, &mut queued);
                     if let Some(changes) = result.as_ref().ok().and_then(Response::changes) {
@@ -90,6 +125,8 @@ impl CollectionActor {
                 sender: Some(sender),
                 worker: Some(worker),
                 subscribers,
+                progress,
+                tr: anki_i18n::I18n::new(&["en"]),
             }),
             Err(error) => {
                 let _ = worker.join();
@@ -105,6 +142,69 @@ impl CollectionActor {
             .send((command, tx))
             .map_err(|_| CoreError::ActorStopped)?;
         rx.recv().map_err(|_| CoreError::ActorStopped)?
+    }
+    /// Queues a data operation without waiting for it.
+    pub fn start_data(&self, command: DataCommand) -> Result<PendingOperation> {
+        let (tx, rx) = mpsc::channel();
+        self.sender
+            .as_ref()
+            .ok_or(CoreError::ActorStopped)?
+            .send((Command::Data(command), tx))
+            .map_err(|_| CoreError::ActorStopped)?;
+        Ok(PendingOperation { reply: rx })
+    }
+    /// Latest progress of the running data operation. Does not go through the
+    /// actor's queue, so it answers while the actor is busy.
+    pub fn progress(&self) -> OperationProgress {
+        use pb::collection::progress::Value;
+        let last = self.progress.lock().unwrap().last_progress;
+        let text = |stage: String| OperationProgress {
+            stage,
+            ..Default::default()
+        };
+        let counted = |stage: String, current: u64, total: u64| OperationProgress {
+            stage,
+            current: Some(current),
+            total: (total > 0).then_some(total),
+        };
+        let strip = |s: String| anki_i18n::without_unicode_isolation(&s);
+        match anki::progress::progress_to_proto(last, &self.tr).value {
+            None | Some(Value::None(_)) => OperationProgress::default(),
+            Some(Value::MediaSync(p)) => {
+                text(strip(format!("{} {} {}", p.checked, p.added, p.removed)))
+            }
+            Some(Value::MediaCheck(s) | Value::Importing(s) | Value::Exporting(s)) => {
+                text(strip(s))
+            }
+            Some(Value::FullSync(p)) => counted(
+                "Transferring collection".into(),
+                p.transferred.into(),
+                p.total.into(),
+            ),
+            Some(Value::NormalSync(p)) => {
+                text(strip(format!("{} {} {}", p.stage, p.added, p.removed)))
+            }
+            Some(Value::DatabaseCheck(p)) => {
+                counted(strip(p.stage), p.stage_current.into(), p.stage_total.into())
+            }
+            Some(Value::ComputeParams(p)) => {
+                counted("Optimizing".into(), p.current.into(), p.total.into())
+            }
+            Some(Value::ComputeRetention(p)) => counted(
+                "Computing retention".into(),
+                p.current.into(),
+                p.total.into(),
+            ),
+            Some(Value::ComputeMemory(p)) => {
+                counted(strip(p.label), p.current_cards.into(), p.total_cards.into())
+            }
+            Some(Value::DownloadUpdate(_)) => text("Downloading".into()),
+        }
+    }
+    /// Asks the running data operation to stop; it then fails with
+    /// `CoreError::Interrupted`. Reset when the next data operation starts.
+    pub fn cancel_operation(&self) {
+        self.progress.lock().unwrap().want_abort = true;
     }
     /// The validated, canonical profile folder.
     pub fn profile_dir(&self) -> &Path {
@@ -157,8 +257,9 @@ impl From<anki::error::AnkiError> for CoreError {
 /// desktop byte for byte (golden test), including the U+2068/U+2069 isolation
 /// marks around message arguments, which display code strips. The language is
 /// fixed to English until tanki has a config (PLAN 4.5).
-fn open_collection(profile: &Path) -> Result<Collection> {
+fn open_collection(profile: &Path, progress: &SharedProgress) -> Result<Collection> {
     Ok(CollectionBuilder::new(profile.join("collection.anki2"))
+        .set_shared_progress_state(progress.clone())
         .set_media_paths(
             profile.join("collection.media"),
             profile.join("collection.media.db2"),
@@ -193,13 +294,17 @@ fn backup(col: &mut Collection, profile: &Path) -> Result<bool> {
 /// The outer error means the collection is gone (another process took it in
 /// the gap, or reopening failed). The inner result is the backup's outcome.
 /// Reopening discards undo history.
-fn backup_and_relock(mut col: Collection, profile: &Path) -> Result<(Collection, Result<()>)> {
+fn backup_and_relock(
+    mut col: Collection,
+    profile: &Path,
+    progress: &SharedProgress,
+) -> Result<(Collection, Result<()>)> {
     let saved = backup(&mut col, profile);
     if matches!(saved, Ok(false)) {
         return Ok((col, Ok(())));
     }
     col.close(None)?;
-    Ok((open_collection(profile)?, saved.map(|_| ())))
+    Ok((open_collection(profile, progress)?, saved.map(|_| ())))
 }
 /// Guard for every operation that can mark the schema modified (PLAN 8.9).
 ///
@@ -245,17 +350,31 @@ fn deck(d: pb::decks::DeckTreeNode) -> Deck {
         filtered: d.filtered,
     }
 }
+/// Data operations that need the collection by value (full upload/download,
+/// collection export, restore) or the backup folder are intercepted by the
+/// actor loop before this point once integrated.
+fn data(col: &mut Collection, command: DataCommand) -> Result<DataResponse> {
+    let pending = || Err(CoreError::Invalid("Not integrated yet".into()));
+    match command {
+        DataCommand::Sync(SyncCommand::Run {
+            direction: SyncDirection::Upload | SyncDirection::Download,
+            ..
+        }) => pending(),
+        DataCommand::Sync(command) => sync_ops::execute(col, command),
+        DataCommand::Package(
+            PackageCommand::ExportCollection { .. } | PackageCommand::Restore { .. },
+        ) => pending(),
+        DataCommand::Package(command) => packages::execute(col, command),
+        DataCommand::Backup { .. } | DataCommand::ListBackups => pending(),
+    }
+}
 fn execute(
     col: &mut Collection,
     command: Command,
     queued: &mut study::StateCache,
 ) -> Result<Response> {
     Ok(match command {
-        Command::Data(_) => {
-            return Err(CoreError::Invalid(
-                "Data operations are not integrated yet".into(),
-            ))
-        }
+        Command::Data(command) => Response::Data(data(col, command)?),
         Command::DeckTree => Response::DeckTree(deck(study::deck_tree(col)?)),
         Command::Queue { limit } => Response::Queue(study::queue(col, limit, queued)?),
         Command::Answer {

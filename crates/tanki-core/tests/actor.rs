@@ -87,3 +87,24 @@ fn symlink_escape_is_rejected() -> Result<()> {
     assert!(!dir.path().join("collection.anki2").exists());
     Ok(())
 }
+
+#[test]
+fn data_operations_poll_without_blocking_and_report_idle_progress() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let actor = CollectionActor::open(dir.path())?;
+    assert_eq!(actor.progress().stage, "");
+    actor.cancel_operation();
+    let pending = actor.start_data(DataCommand::ListBackups)?;
+    // The cancel flag is reset when the operation starts; the stub refuses.
+    let result = loop {
+        match pending.try_recv() {
+            Ok(Some(response)) => break Ok(response),
+            Ok(None) => std::thread::yield_now(),
+            Err(error) => break Err(error),
+        }
+    };
+    assert!(matches!(result, Err(CoreError::Invalid(_))));
+    // The actor keeps serving after a failed data operation.
+    assert!(matches!(actor.execute(Command::DeckTree)?, Response::DeckTree(_)));
+    actor.close()
+}

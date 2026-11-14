@@ -12,7 +12,7 @@ mod sync;
 #[doc(hidden)]
 pub mod sync_ops;
 mod types;
-pub use actor::CollectionActor;
+pub use actor::{CollectionActor, PendingOperation};
 pub use data::*;
 pub use safety::validate_profile;
 pub use sync::SyncEndpoint;

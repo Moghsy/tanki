@@ -115,3 +115,18 @@ ordinary import never silently replaces a collection because of a filename.
 - Worktrees hold their own local clone of the pinned Anki checkout at
   `vendor/anki` with patch 0001 applied. Never stage `vendor/anki`; stage
   files by name.
+- `sync_ops.rs` and `packages.rs` hold the fixed signatures with placeholder
+  bodies; `restore_to_stage` takes `crate::actor::SharedProgress`
+  (`Arc<Mutex<anki::progress::ProgressState>>`). The actor already dispatches
+  `DataCommand::Sync` (except full upload/download) to `sync_ops::execute` and
+  `DataCommand::Package` (except `ExportCollection`/`Restore`) to
+  `packages::execute`, so streams can test end to end through
+  `CollectionActor::execute(Command::Data(..))` or `start_data`.
+  `start_data`, `PendingOperation::{try_recv, wait}`, `progress()` and
+  `cancel_operation()` work now; the collection is built with the shared
+  progress state, which is reset at the start of every data command.
+  `Response::changes()` includes `DataResponse::Imported`.
+- CLI exit codes (main.rs maps them): 20 locked (exists), 21 full-sync choice
+  required, 22 auth required, 23 sync not configured, 24 schema change needs
+  confirmation, 25 profile busy (WAL or `/proc`). Stream CLI modules return an
+  error type exposing `exit_code() -> u8`; the lead downcasts it in `main`.
