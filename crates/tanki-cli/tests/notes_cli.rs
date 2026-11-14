@@ -275,6 +275,8 @@ fn edit_file_changes_only_the_changed_field() {
     let note = stored(b, id);
     let path = b.join("e.md");
     std::fs::write(&path, note_file(id, note.mtime_secs, "front", "back2")).unwrap();
+    // mtime has one-second resolution: make the edit land in a later second.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
     let out = ok(b, &["--json", "edit", "--file", path.to_str().unwrap()]);
     let value: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(value["updated"], serde_json::json!([id]));
@@ -357,7 +359,6 @@ fn delete_by_id_needs_yes_when_not_interactive() {
 // ---- tests that need search (Browser stream) ---------------------------------
 
 #[test]
-#[ignore = "needs browse_ops"]
 fn search_formats_sort_limit_and_errors() {
     let base = fixture();
     let b = base.path();
@@ -417,7 +418,6 @@ fn search_formats_sort_limit_and_errors() {
 }
 
 #[test]
-#[ignore = "needs browse_ops"]
 fn edit_and_delete_by_query() {
     let base = fixture();
     let b = base.path();
@@ -449,7 +449,6 @@ fn edit_and_delete_by_query() {
 /// Phase 3 exit test, second half: add -> search -> edit -> delete through
 /// the CLI only.
 #[test]
-#[ignore = "needs browse_ops"]
 fn exit_add_search_edit_delete() {
     let base = fixture();
     let b = base.path();
