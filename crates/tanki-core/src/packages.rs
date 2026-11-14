@@ -267,7 +267,11 @@ fn import_log(log: NoteLog) -> ImportLog {
 
 /// The collection's schema-modified time, through the public sync metadata.
 fn schema_stamp(col: &Collection) -> Result<i64> {
-    Ok(col.sync_meta().map_err(|e| anki_error(e, col.tr()))?.schema.0)
+    Ok(col
+        .sync_meta()
+        .map_err(|e| anki_error(e, col.tr()))?
+        .schema
+        .0)
 }
 
 fn check_import_path(path: &Path) -> Result<()> {
@@ -395,7 +399,10 @@ mod tests {
     #[test]
     fn colpkg_import_is_refused_before_reading() {
         let error = check_import_path(Path::new("/nonexistent/backup.colpkg")).unwrap_err();
-        assert!(error.to_string().contains("tanki backup restore"), "{error}");
+        assert!(
+            error.to_string().contains("tanki backup restore"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -411,7 +418,10 @@ mod tests {
             found_notes: 4,
             ..Default::default()
         });
-        assert_eq!((log.new, log.updated, log.duplicate, log.conflicting), (2, 0, 1, 1));
+        assert_eq!(
+            (log.new, log.updated, log.duplicate, log.conflicting),
+            (2, 0, 1, 1)
+        );
         assert_eq!(log.found_notes, 4);
         assert_eq!(
             log.entries.keys().collect::<Vec<_>>(),
