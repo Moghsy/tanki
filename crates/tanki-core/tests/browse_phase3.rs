@@ -377,6 +377,7 @@ fn settings_use_desktop_keys_and_defaults() -> Result<()> {
             card_sort_reverse: false,
             note_sort: "noteCrt".into(),
             note_sort_reverse: false,
+            default_search: String::new(),
         }
     );
     let new = BrowserSettings {
@@ -387,6 +388,7 @@ fn settings_use_desktop_keys_and_defaults() -> Result<()> {
         card_sort_reverse: true,
         note_sort: "noteCrt".into(),
         note_sort_reverse: true,
+        default_search: String::new(),
     };
     let changes = changed(&actor, BrowseCommand::SetSettings(new.clone()));
     assert!(changes.config);
@@ -849,5 +851,98 @@ fn find_and_replace_refuses_empty_ids_and_honours_scope() -> Result<()> {
     );
     assert_eq!(note(&actor, b).tags, ["beast::pet"]);
     assert_eq!(note(&actor, a).tags, ["Animal"]);
+    Ok(())
+}
+
+#[test]
+fn section_collapse_and_default_search_use_desktop_keys() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let actor = CollectionActor::open(dir.path())?;
+    assert_eq!(sidebar(&actor).section_collapsed, [false; 7]);
+    // Today (1) and Tags (6), in `SidebarStage` order.
+    for section in [1u8, 6] {
+        let changes = changed(
+            &actor,
+            BrowseCommand::SetSectionCollapsed {
+                section,
+                collapsed: true,
+            },
+        );
+        assert!(changes.config);
+    }
+    assert_eq!(
+        sidebar(&actor).section_collapsed,
+        [false, true, false, false, false, false, true]
+    );
+    changed(
+        &actor,
+        BrowseCommand::SetSectionCollapsed {
+            section: 1,
+            collapsed: false,
+        },
+    );
+    invalid(browse(
+        &actor,
+        BrowseCommand::SetSectionCollapsed {
+            section: 7,
+            collapsed: true,
+        },
+    ));
+    assert_eq!(settings(&actor).default_search, "");
+    actor.close()?;
+    let raw = |key| raw_config(dir.path(), key);
+    assert_eq!(raw("collapseToday"), Some(serde_json::json!(false)));
+    assert_eq!(raw("collapseTags"), Some(serde_json::json!(true)));
+    assert_eq!(raw("collapseDecks"), None);
+
+    // What desktop wrote is read back.
+    write_raw_config(dir.path(), "collapseFlags", serde_json::json!(true));
+    write_raw_config(
+        dir.path(),
+        "defaultSearchText",
+        serde_json::json!("is:due deck:Lang"),
+    );
+    let actor = CollectionActor::open_with_options(
+        dir.path(),
+        OpenOptions {
+            seen_before: true,
+            ..Default::default()
+        },
+    )?;
+    assert_eq!(
+        sidebar(&actor).section_collapsed,
+        [false, false, true, false, false, false, true]
+    );
+    assert_eq!(settings(&actor).default_search, "is:due deck:Lang");
+    Ok(())
+}
+
+#[test]
+fn search_errors_are_invalid_without_isolation_marks() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let actor = CollectionActor::open(dir.path())?;
+    add(&actor, "Basic", &["x", "y"], &[]);
+    for query in ["a and", "(", "prop:due>x"] {
+        let message = invalid(browse(
+            &actor,
+            BrowseCommand::Search {
+                query: query.into(),
+                mode: BrowseMode::Cards,
+                order: SearchOrder::None,
+            },
+        ));
+        assert!(!message.is_empty(), "{query}");
+        assert!(
+            !message.contains(['\u{2068}', '\u{2069}']),
+            "{query}: {message:?}"
+        );
+    }
+    // Normalising goes through the same conversion.
+    assert!(matches!(
+        actor.execute(Command::Browse(BrowseCommand::NormalizeSearch {
+            query: "prop:due>x".into()
+        })),
+        Err(CoreError::Invalid(_))
+    ));
     Ok(())
 }

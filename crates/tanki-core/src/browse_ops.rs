@@ -33,6 +33,17 @@ const DEFAULT_NOTE_COLUMNS: [&str; 4] = ["noteFld", "note", "template", "noteTag
 /// `table/model.py` `_search_inner`: an unset or unknown sort column falls
 /// back to the creation time.
 const FALLBACK_SORT: &str = "noteCrt";
+/// The sidebar sections' collapse keys in `SidebarStage` order
+/// (`qt/aqt/browser/sidebar/tree.py`, `_section_root(collapse_key=...)`).
+const SECTION_KEYS: [BoolKey; 7] = [
+    BoolKey::CollapseSavedSearches,
+    BoolKey::CollapseToday,
+    BoolKey::CollapseFlags,
+    BoolKey::CollapseCardState,
+    BoolKey::CollapseDecks,
+    BoolKey::CollapseNotetypes,
+    BoolKey::CollapseTags,
+];
 
 pub(crate) fn execute(col: &mut Collection, command: BrowseCommand) -> Result<EditResponse> {
     use EditResponse as R;
@@ -40,7 +51,6 @@ pub(crate) fn execute(col: &mut Collection, command: BrowseCommand) -> Result<Ed
         BrowseCommand::Search { query, mode, order } => R::Ids(search(col, &query, mode, order)?),
         BrowseCommand::NormalizeSearch { query } => R::Text(searching(
             SearchService::build_search_string(col, text_node(query)),
-            col,
         )?),
         BrowseCommand::JoinSearch {
             existing,
@@ -58,31 +68,25 @@ pub(crate) fn execute(col: &mut Collection, command: BrowseCommand) -> Result<Ed
                 SearchJoiner::And => Joiner::And,
                 SearchJoiner::Or => Joiner::Or,
             };
-            R::Text(searching(
-                SearchService::join_search_nodes(
-                    col,
-                    pb::search::JoinSearchNodesRequest {
-                        joiner: joiner as i32,
-                        existing_node: Some(text_node(existing)),
-                        additional_node: Some(additional),
-                    },
-                ),
+            R::Text(searching(SearchService::join_search_nodes(
                 col,
-            )?)
+                pb::search::JoinSearchNodesRequest {
+                    joiner: joiner as i32,
+                    existing_node: Some(text_node(existing)),
+                    additional_node: Some(additional),
+                },
+            ))?)
         }
         BrowseCommand::ReplaceSearch {
             existing,
             replacement,
-        } => R::Text(searching(
-            SearchService::replace_search_node(
-                col,
-                pb::search::ReplaceSearchNodeRequest {
-                    existing_node: Some(text_node(existing)),
-                    replacement_node: Some(text_node(replacement)),
-                },
-            ),
+        } => R::Text(searching(SearchService::replace_search_node(
             col,
-        )?),
+            pb::search::ReplaceSearchNodeRequest {
+                existing_node: Some(text_node(existing)),
+                replacement_node: Some(text_node(replacement)),
+            },
+        ))?),
         BrowseCommand::Columns => R::Columns(columns(col)?),
         BrowseCommand::Settings => R::Settings(settings(col)?),
         BrowseCommand::SetSettings(new) => R::Changes(set_settings(col, new)?),
@@ -103,6 +107,12 @@ pub(crate) fn execute(col: &mut Collection, command: BrowseCommand) -> Result<Ed
                 col,
                 pb::tags::SetTagCollapsedRequest { name, collapsed },
             )?))
+        }
+        BrowseCommand::SetSectionCollapsed { section, collapsed } => {
+            let key = SECTION_KEYS.get(section as usize).copied().ok_or_else(|| {
+                CoreError::Invalid(format!("There is no sidebar section {section}"))
+            })?;
+            R::Changes(set_bool(col, key, collapsed)?)
         }
         BrowseCommand::SetSavedSearches { searches } => {
             let map: serde_json::Map<String, serde_json::Value> = searches
@@ -248,23 +258,10 @@ fn count(out: pb::collection::OpChangesWithCount) -> EditResponse {
     }
 }
 
-/// Search syntax errors (and invalid regexes) carry Anki's message as
-/// `CoreError::Invalid`, without Fluent's isolation marks.
-fn search_error(col: &Collection, error: AnkiError) -> CoreError {
-    match error {
-        AnkiError::SearchError { .. } => CoreError::Invalid(plain(error.message(col.tr()))),
-        AnkiError::InvalidRegex { info } => CoreError::Invalid(info),
-        other => other.into(),
-    }
-}
-
-fn searching(
-    result: std::result::Result<pb::generic::String, AnkiError>,
-    col: &Collection,
-) -> Result<String> {
-    result
-        .map(|s| s.val)
-        .map_err(|error| search_error(col, error))
+/// Search syntax errors (and invalid regexes) become `CoreError::Invalid`
+/// with Anki's message in the `From<AnkiError>` conversion.
+fn searching(result: std::result::Result<pb::generic::String, AnkiError>) -> Result<String> {
+    Ok(result.map(|s| s.val)?)
 }
 
 fn text_node(text: String) -> pb::search::SearchNode {
@@ -364,9 +361,7 @@ fn search(
         BrowseMode::Cards => SearchService::search_cards(col, request),
         BrowseMode::Notes => SearchService::search_notes(col, request),
     };
-    result
-        .map(|r| r.ids)
-        .map_err(|error| search_error(col, error))
+    Ok(result.map(|r| r.ids)?)
 }
 
 // ---- config -----------------------------------------------------------------
@@ -453,7 +448,15 @@ fn settings_with(
     } else {
         BrowseMode::Cards
     };
+    let default_search = ConfigService::get_config_string(
+        col,
+        pb::config::GetConfigStringRequest {
+            key: StringKey::DefaultSearchText as i32,
+        },
+    )?
+    .val;
     Ok(BrowserSettings {
+        default_search,
         mode,
         card_columns,
         note_columns,
@@ -644,6 +647,10 @@ fn saved_searches(col: &mut Collection) -> Vec<(String, String)> {
 
 fn sidebar(col: &mut Collection) -> Result<SidebarData> {
     let saved_searches = saved_searches(col);
+    let mut section_collapsed = [false; 7];
+    for (collapsed, key) in section_collapsed.iter_mut().zip(SECTION_KEYS) {
+        *collapsed = get_bool(col, key)?;
+    }
     // `now: 0` = no counts, browser-scope collapse state.
     let tree = DecksService::deck_tree(col, pb::decks::DeckTreeRequest { now: 0 })?;
     let decks = tree
@@ -658,6 +665,7 @@ fn sidebar(col: &mut Collection) -> Result<SidebarData> {
         tags,
         notetypes: all_notetypes(col)?,
         flag_names: flag_names(col),
+        section_collapsed,
     })
 }
 
@@ -760,7 +768,7 @@ fn find_replace(col: &mut Collection, request: FindReplace) -> Result<EditRespon
             },
         ),
     };
-    result.map(count).map_err(|error| search_error(col, error))
+    Ok(result.map(count)?)
 }
 
 #[cfg(test)]

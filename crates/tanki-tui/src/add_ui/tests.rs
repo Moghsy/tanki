@@ -37,17 +37,18 @@ fn notetype(id: i64, name: &str, fields: &[&str], kind: NotetypeKind) -> Notetyp
     }
 }
 
-struct Fake {
+/// Also used by the app's Phase 3 tests.
+pub(crate) struct Fake {
     notetypes: RefCell<Vec<NotetypeInfo>>,
-    notes: RefCell<HashMap<i64, NoteData>>,
+    pub(crate) notes: RefCell<HashMap<i64, NoteData>>,
     next_id: RefCell<i64>,
     log: RefCell<Vec<String>>,
     /// Makes the next `UpdateNotes` report a conflict.
-    conflict: RefCell<bool>,
+    pub(crate) conflict: RefCell<bool>,
 }
 
 impl Fake {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let mut basic = notetype(1, "Basic", &["Front", "Back"], NotetypeKind::Normal);
         basic.fields[1].description = "The answer".into();
         Self {
@@ -71,14 +72,14 @@ impl Fake {
             conflict: RefCell::new(false),
         }
     }
-    fn count(&self, prefix: &str) -> usize {
+    pub(crate) fn count(&self, prefix: &str) -> usize {
         self.log
             .borrow()
             .iter()
             .filter(|l| l.starts_with(prefix))
             .count()
     }
-    fn insert(&self, note: NoteData) -> i64 {
+    pub(crate) fn insert(&self, note: NoteData) -> i64 {
         let id = *self.next_id.borrow();
         *self.next_id.borrow_mut() += 1;
         self.notes.borrow_mut().insert(
@@ -193,6 +194,12 @@ impl Backend for Fake {
                     .get(&id)
                     .cloned()
                     .ok_or(CoreError::Invalid("gone".into()))?,
+            ),
+            NoteCommand::GetNotes { ids } => EditResponse::Notes(
+                ids.iter()
+                    .map(|id| self.notes.borrow().get(id).cloned())
+                    .collect::<Option<Vec<_>>>()
+                    .ok_or(CoreError::Invalid("no note".into()))?,
             ),
             NoteCommand::UpdateNotes { updates } => {
                 let mut report = UpdateReport::default();
@@ -353,7 +360,13 @@ fn add_flow_with_sticky_history_and_checks() {
     // Tags with completion.
     ui.on_key(&b, ctrl('t'));
     typed(&mut ui, &b, "lan");
-    assert_eq!(ui.tag_popup.items, ["lang::es", "language"]);
+    let offered: Vec<&str> = ui
+        .tag_completion
+        .candidates()
+        .iter()
+        .map(|c| c.text.as_str())
+        .collect();
+    assert_eq!(offered, ["lang::es", "language"]);
     ui.on_key(&b, key(KeyCode::Down));
     ui.on_key(&b, key(KeyCode::Enter));
     assert_eq!(ui.tags_text(), "language ");
@@ -803,10 +816,10 @@ fn snapshot_filled_form_with_sticky_and_tags_popup() {
             "Back [sticky]",
             "hello",
             "",
-            " lang::es",
-            " language",
-            "",
-            "Tags",
+            "┌──────────┐",
+            "│lang::es  │",
+            "│language  │",
+            "└──────────┘",
             "lan",
             "",
             "",
@@ -873,4 +886,29 @@ fn hints_follow_the_context() {
     ui.on_key(&b, alt('f'));
     assert!(ui.hints().contains("Tab complete"));
     assert!(KEYS.iter().any(|(k, _)| k.contains("Ctrl+Enter")));
+}
+
+#[test]
+fn tag_completion_uses_the_shared_popup_keys() {
+    let b = Fake::new();
+    let mut ui = new_add(&b);
+    ui.on_key(&b, ctrl('t'));
+    typed(&mut ui, &b, "lan");
+    assert!(ui.tag_completion.is_open());
+    // Tab moves through the candidates instead of leaving the field.
+    ui.on_key(&b, key(KeyCode::Tab));
+    assert_eq!(ui.form.focus, Focus::Tags);
+    assert_eq!(ui.tag_completion.selected().unwrap().text, "language");
+    // Esc only dismisses the popup.
+    ui.on_key(&b, key(KeyCode::Esc));
+    assert!(!ui.tag_completion.is_open());
+    assert!(!ui.has_overlay());
+    // Tab reopens it; Enter accepts and adds a space.
+    ui.on_key(&b, key(KeyCode::Tab));
+    ui.on_key(&b, key(KeyCode::Enter));
+    assert_eq!(ui.tags_text(), "lang::es ");
+    assert!(b.count("CompleteTag") >= 2);
+    // Nothing to complete: Tab goes to the first field.
+    ui.on_key(&b, key(KeyCode::Tab));
+    assert_eq!(ui.form.focus, Focus::Field(0));
 }

@@ -1,6 +1,4 @@
 //! Conversions shared by the Phase 3 core streams (lead-owned).
-// Used by notes_ops and browse_ops once the streams land; the lead removes this allow at integration.
-#![allow(dead_code)]
 use crate::*;
 use anki::{collection::Collection, services::NotetypesService};
 use anki_proto as pb;

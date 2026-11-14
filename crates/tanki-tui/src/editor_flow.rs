@@ -382,6 +382,93 @@ pub fn add_notes(
     run(backend, &[], template, options, run_editor)
 }
 
+/// The result of [`edit_text`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TextOutcome {
+    /// The saved text (it passed the check).
+    Edited(String),
+    /// Saved without changes.
+    Unchanged,
+    /// The editor failed, or a reopened file was saved unchanged. `kept` is
+    /// the file when it holds text the user typed.
+    Aborted { kept: Option<PathBuf> },
+}
+
+/// Edits `initial` in the editor without touching the collection (the add
+/// screen's "field / note in `$EDITOR`"). The file is `file_name` in a
+/// private temporary folder. `check` lists problems in the saved text; the
+/// file is then reopened with them as `#` comments at the top (for note
+/// files; a check that never fails suits any text).
+pub fn edit_text(
+    initial: &str,
+    file_name: &str,
+    options: &FlowOptions,
+    check: &mut dyn FnMut(&str) -> Vec<Problem>,
+    run_editor: &mut dyn FnMut(&Path) -> io::Result<EditorExit>,
+) -> std::result::Result<TextOutcome, FlowError> {
+    let io_error = |what: &str, e: io::Error, kept: Option<PathBuf>| FlowError {
+        message: format!("{what}: {e}"),
+        kept,
+    };
+    let workspace = Workspace::create_named(options.temp_dir.as_deref(), file_name)
+        .map_err(|e| io_error("Could not create the temporary file", e, None))?;
+    if let Err(e) = workspace.write(initial) {
+        workspace.remove();
+        return Err(io_error("Could not write the temporary file", e, None));
+    }
+    let max_rounds = if options.max_rounds == 0 {
+        20
+    } else {
+        options.max_rounds
+    };
+    let path = workspace.file.clone();
+    let mut written = initial.to_owned();
+    let mut round = 0;
+    loop {
+        let keep = |text: &str| -> Option<PathBuf> {
+            if text == initial {
+                workspace.remove();
+                None
+            } else {
+                Some(path.clone())
+            }
+        };
+        let exit = match run_editor(&path) {
+            Ok(exit) => exit,
+            Err(e) => {
+                let text = fs::read_to_string(&path).unwrap_or_else(|_| initial.to_owned());
+                return Err(io_error("Could not run the editor", e, keep(&text)));
+            }
+        };
+        let text = fs::read_to_string(&path)
+            .map_err(|e| io_error("Could not read the temporary file", e, keep(&written)))?;
+        if exit == EditorExit::Failure {
+            return Ok(TextOutcome::Aborted { kept: keep(&text) });
+        }
+        if text == written {
+            return Ok(if round == 0 {
+                workspace.remove();
+                TextOutcome::Unchanged
+            } else {
+                TextOutcome::Aborted { kept: Some(path) }
+            });
+        }
+        let problems = check(&text);
+        if problems.is_empty() {
+            workspace.remove();
+            return Ok(TextOutcome::Edited(text));
+        }
+        round += 1;
+        if round >= max_rounds {
+            return Ok(TextOutcome::Aborted { kept: Some(path) });
+        }
+        written = annotate(&text, &problems);
+        workspace
+            .write(&written)
+            .map_err(|e| io_error("Could not write the temporary file", e, Some(path.clone())))?;
+    }
+}
+
 /// A private temporary folder holding the note file.
 struct Workspace {
     dir: PathBuf,
@@ -390,6 +477,10 @@ struct Workspace {
 
 impl Workspace {
     fn create(base: Option<&Path>) -> io::Result<Self> {
+        Self::create_named(base, "notes.md")
+    }
+
+    fn create_named(base: Option<&Path>, name: &str) -> io::Result<Self> {
         let base = base.map_or_else(std::env::temp_dir, Path::to_path_buf);
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -407,7 +498,7 @@ impl Workspace {
             }
             match builder.create(&dir) {
                 Ok(()) => {
-                    let file = dir.join("notes.md");
+                    let file = dir.join(name);
                     return Ok(Self { dir, file });
                 }
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
@@ -1068,5 +1159,58 @@ mod tests {
             notefile::parse(&out).unwrap_err().message,
             notefile::parse(text).unwrap_err().message
         );
+    }
+
+    #[test]
+    fn edit_text_reopens_on_problems_and_cleans_up() {
+        let base = Base::new("edit-text");
+        let options = base.options();
+        let no_problems = &mut |_: &str| Vec::new();
+        // Unchanged, then edited; the folder is removed both times.
+        let out = edit_text("x", "field.html", &options, no_problems, &mut |_| {
+            Ok(EditorExit::Success)
+        });
+        assert_eq!(out, Ok(TextOutcome::Unchanged));
+        let out = edit_text("x", "field.html", &options, no_problems, &mut |p| {
+            assert!(p.ends_with("field.html"));
+            fs::write(p, "<b>y</b>\n")?;
+            Ok(EditorExit::Success)
+        });
+        assert_eq!(out, Ok(TextOutcome::Edited("<b>y</b>\n".into())));
+        assert!(base.is_empty());
+        // A problem reopens the file with it on top; fixing it is accepted.
+        let mut rounds = Vec::new();
+        let check = &mut |t: &str| {
+            if t.contains("bad") {
+                vec![Problem {
+                    line: 1,
+                    message: "still bad".into(),
+                }]
+            } else {
+                Vec::new()
+            }
+        };
+        let out = edit_text("# Note\n", "note.md", &options, check, &mut |p| {
+            let text = fs::read_to_string(p)?;
+            rounds.push(text.clone());
+            let next = if rounds.len() == 1 {
+                "# Note\nbad\n"
+            } else {
+                "# Note\ngood\n"
+            };
+            fs::write(p, next)?;
+            Ok(EditorExit::Success)
+        });
+        assert_eq!(out, Ok(TextOutcome::Edited("# Note\ngood\n".into())));
+        assert!(rounds[1].contains("still bad"), "{}", rounds[1]);
+        // A failing editor keeps typed text.
+        let out = edit_text("x", "f.txt", &options, no_problems, &mut |p| {
+            fs::write(p, "typed")?;
+            Ok(EditorExit::Failure)
+        });
+        let Ok(TextOutcome::Aborted { kept: Some(kept) }) = out else {
+            panic!("{out:?}")
+        };
+        assert_eq!(fs::read_to_string(&kept).unwrap(), "typed");
     }
 }

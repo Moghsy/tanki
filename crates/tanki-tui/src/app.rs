@@ -1,6 +1,9 @@
 //! Application state: screens, overlays, the status line and the event
 //! dispatcher. Drawing lives in `ui.rs`; the terminal loop in `terminal.rs`.
+use crate::add_ui::AddUi;
 use crate::backend::{self, Backend, DeckRow, Tracked};
+use crate::browser_ui::BrowserUi;
+use crate::editor_flow::{EditorExit, FlowOptions};
 use crate::input::TextInput;
 use crate::keymap::{Action, Chord, Keymap, Scope};
 use crate::package_ui::PackageUi;
@@ -22,6 +25,9 @@ pub const MESSAGE_SECS: u64 = 5;
 pub const CONGRATS_POLL_SECS: u64 = 60;
 
 pub type Opener = Box<dyn Fn(&Path) -> std::io::Result<()>>;
+/// Runs the editor command (program and arguments) on a file and waits. The
+/// terminal loop's runner suspends the screen around it; tests inject one.
+pub type EditorRunner = Box<dyn FnMut(&[String], &Path) -> std::io::Result<EditorExit>>;
 
 pub struct Services {
     pub renderer: Box<dyn CardRenderer>,
@@ -136,6 +142,25 @@ pub enum PromptKind {
 pub enum ConfirmKind {
     DeleteNote,
     UpgradeScheduler,
+    /// Quit although the add / edit screen has unsaved input.
+    QuitDiscard,
+}
+
+/// A full-screen widget over the current screen (desktop opens these as
+/// windows): the screen below keeps its state, e.g. the reviewer's card.
+/// The top layer gets the keys and is drawn instead of the screen.
+pub enum Layer {
+    Add(Box<AddUi>),
+    Browser(Box<BrowserUi>),
+}
+
+impl Layer {
+    pub fn scope(&self) -> Scope {
+        match self {
+            Layer::Add(_) => Scope::Add,
+            Layer::Browser(_) => Scope::Browser,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -221,6 +246,11 @@ pub struct App<'a> {
     job: Option<data::Job>,
     /// The list behind the open restore chooser.
     backups: Vec<BackupInfo>,
+    /// Add / edit and browser screens over `screen`, topmost last.
+    pub layers: Vec<Layer>,
+    pub(crate) editor: EditorRunner,
+    /// Where the editor flows put their private temporary folders.
+    pub(crate) flow_options: FlowOptions,
 }
 
 impl<'a> App<'a> {
@@ -253,6 +283,9 @@ impl<'a> App<'a> {
             package_ui: None,
             job: None,
             backups: Vec::new(),
+            layers: Vec::new(),
+            editor: Box::new(|_, _| Err(std::io::Error::other("No terminal to run the editor in"))),
+            flow_options: FlowOptions::default(),
         };
         app.next_day_at = backend::sched_timing(&app.backend)
             .ok()
@@ -287,7 +320,10 @@ impl<'a> App<'a> {
         )
     }
     pub fn scopes(&self) -> Vec<Scope> {
-        vec![self.screen.scope(), Scope::Global]
+        match self.layers.last() {
+            Some(layer) => vec![layer.scope()],
+            None => vec![self.screen.scope(), Scope::Global],
+        }
     }
 
     // ---- messages ----------------------------------------------------------
@@ -537,7 +573,7 @@ impl<'a> App<'a> {
             AppEvent::FocusLost => self.focused = false,
             AppEvent::Changes(changes) => self.on_changes(&changes),
             AppEvent::Audio(AudioEvent::Idle) => {
-                if self.overlay.is_some() {
+                if self.overlay.is_some() || !self.layers.is_empty() {
                     return;
                 }
                 let focused = self.focused;
@@ -556,7 +592,8 @@ impl<'a> App<'a> {
         let now = self.now;
         self.poll_job();
         if let Screen::Review(_) = self.screen {
-            if self.overlay.is_none() {
+            // The reviewer waits (no auto advance) under the add / browser.
+            if self.overlay.is_none() && self.layers.is_empty() {
                 let playing = self.services.audio.is_playing();
                 let focused = self.focused;
                 self.with_reviewer(|r, b, now| r.tick(b, now, playing, focused));
@@ -606,6 +643,17 @@ impl<'a> App<'a> {
         if self.backend.take_own() {
             return;
         }
+        for layer in &mut self.layers {
+            match layer {
+                Layer::Add(ui) => ui.on_changes(&self.backend, changes),
+                Layer::Browser(ui) => ui.on_changes(&self.backend, changes),
+            }
+        }
+        self.changes_below(changes);
+    }
+
+    /// Refreshes the screen (under any layers) after `changes`.
+    pub(crate) fn changes_below(&mut self, changes: &OpChanges) {
         match &self.screen {
             Screen::Review(_) => {
                 let changes = changes.clone();
@@ -631,6 +679,7 @@ impl<'a> App<'a> {
             }
             Some(Overlay::Prompt { input, .. }) => input.insert_str(text),
             Some(_) => {}
+            None if !self.layers.is_empty() => self.layer_paste(text),
             None => {
                 if let Some(view) = self.review() {
                     if let Some(input) = view.reviewer.typed_mut() {
@@ -643,7 +692,11 @@ impl<'a> App<'a> {
     }
 
     fn on_mouse(&mut self, mouse: MouseEvent) {
-        if self.overlay.is_some() || self.sync_ui.is_visible() || self.package_ui.is_some() {
+        if self.overlay.is_some()
+            || self.sync_ui.is_visible()
+            || self.package_ui.is_some()
+            || !self.layers.is_empty()
+        {
             return;
         }
         match mouse.kind {
@@ -731,6 +784,15 @@ impl<'a> App<'a> {
         let Some(chord) = Chord::from_event(&key) else {
             return;
         };
+        // The add and browser screens take every key but their scope's own.
+        if self.overlay.is_none()
+            && !self.layers.is_empty()
+            && !self.sync_ui.is_visible()
+            && self.package_ui.is_none()
+        {
+            self.layer_key(key, chord);
+            return;
+        }
         // Ctrl+C cancels a running sync or package operation instead of quitting.
         let cancels = chord.ctrl
             && chord.code == KeyCode::Char('c')
@@ -800,8 +862,31 @@ impl<'a> App<'a> {
     /// Runs `action` on the current screen.
     pub fn dispatch(&mut self, action: Action) {
         let now = self.now;
+        if !self.layers.is_empty() {
+            // Over a layer only these make sense; screen actions would act
+            // on the hidden screen.
+            match action {
+                Action::Quit => self.request_quit(),
+                Action::Help => self.overlay = Some(Overlay::Help { scroll: 0 }),
+                Action::About => self.overlay = Some(Overlay::About),
+                Action::AddNote => self.open_add(),
+                Action::Browse => self.open_browser(None),
+                _ => {}
+            }
+            return;
+        }
         match action {
             Action::Quit => self.quit = true,
+            Action::AddNote => self.open_add(),
+            Action::Browse => {
+                let search = match &self.screen {
+                    Screen::Review(view) => {
+                        view.reviewer.card().map(|c| format!("cid:{}", c.queued.id))
+                    }
+                    _ => None,
+                };
+                self.open_browser(search);
+            }
             Action::Help => self.overlay = Some(Overlay::Help { scroll: 0 }),
             Action::About => self.overlay = Some(Overlay::About),
             Action::Palette => {
@@ -1169,6 +1254,7 @@ impl<'a> App<'a> {
                 }
             }
             Action::OpenInBrowser => self.open_in_browser(),
+            Action::EditNote => self.open_edit_current(),
             Action::ToggleHints | Action::ToggleDetails => {
                 let hints = action == Action::ToggleHints;
                 let keys: Vec<(String, bool)> = self
@@ -1309,6 +1395,7 @@ impl<'a> App<'a> {
             item(Action::BuryNote, "Bury Note", false),
             item(Action::SuspendNote, "Suspend Note", false),
             item(Action::DeleteNote, "Delete Note...", false),
+            item(Action::EditNote, "Edit Note...", false),
             item(Action::Replay, "Replay Audio", false),
             item(Action::PlayNextButton, "Play Next Audio Button", false),
             item(Action::PauseAudio, "Pause Audio", false),
@@ -1576,6 +1663,7 @@ impl<'a> App<'a> {
             ConfirmKind::UpgradeScheduler => {
                 self.with_reviewer(|r, b, now| r.upgrade_scheduler(b, now))
             }
+            ConfirmKind::QuitDiscard => self.quit = true,
         }
     }
 
@@ -1609,8 +1697,11 @@ pub fn graphics_name(mode: tanki_term::GraphicsMode) -> &'static str {
 }
 
 mod data;
+mod notes;
 
 #[cfg(test)]
 mod data_tests;
+#[cfg(test)]
+mod notes_tests;
 #[cfg(test)]
 mod tests;

@@ -1,5 +1,6 @@
-//! tanki-tui: the full-screen study interface (PLAN 7, 11 Phase 1): deck
-//! list, overview, reviewer, congrats and image zoom, over
+//! tanki-tui: the full-screen interface (PLAN 7, 11): deck list, overview,
+//! reviewer, congrats and image zoom (Phase 1), sync and packages (Phase 2),
+//! the add / edit screen and the browser (Phase 3), over
 //! `tanki_core::CollectionActor`.
 pub mod add_ui;
 pub mod app;

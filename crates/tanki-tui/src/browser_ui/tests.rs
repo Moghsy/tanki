@@ -8,13 +8,15 @@ use tanki_core::{
     FieldInfo, ForgetDefaults, NotetypeInfo, RepositionDefaults, SidebarDeck, TagNode, TemplateInfo,
 };
 
-struct Fake {
+/// Also used by the app's Phase 3 tests.
+pub(crate) struct Fake {
     cards: usize,
     log: RefCell<Vec<Command>>,
     settings: RefCell<BrowserSettings>,
     saved: RefCell<Vec<(String, String)>>,
     rows_requested: Cell<usize>,
     deleted_notes: RefCell<HashSet<i64>>,
+    sections: RefCell<[bool; 7]>,
 }
 
 fn note_of(card: i64) -> i64 {
@@ -30,7 +32,7 @@ fn table_changes() -> OpChanges {
 }
 
 impl Fake {
-    fn new(cards: usize) -> Self {
+    pub(crate) fn new(cards: usize) -> Self {
         Self {
             cards,
             log: RefCell::new(Vec::new()),
@@ -46,14 +48,16 @@ impl Fake {
                 card_sort_reverse: false,
                 note_sort: "noteCrt".into(),
                 note_sort_reverse: false,
+                default_search: String::new(),
             }),
             saved: RefCell::new(vec![("Due cards".into(), "is:due".into())]),
             rows_requested: Cell::new(0),
             deleted_notes: RefCell::new(HashSet::new()),
+            sections: RefCell::new([false; 7]),
         }
     }
 
-    fn logged(&self, pred: impl Fn(&Command) -> bool) -> Vec<Command> {
+    pub(crate) fn logged(&self, pred: impl Fn(&Command) -> bool) -> Vec<Command> {
         self.log
             .borrow()
             .iter()
@@ -194,6 +198,7 @@ impl Fake {
 
     fn sidebar(&self) -> SidebarData {
         SidebarData {
+            section_collapsed: *self.sections.borrow(),
             saved_searches: self.saved.borrow().clone(),
             decks: vec![
                 SidebarDeck {
@@ -327,6 +332,13 @@ impl Fake {
             }
             BrowseCommand::SetDeckCollapsed { .. } | BrowseCommand::SetTagCollapsed { .. } => {
                 R::Changes(OpChanges::default())
+            }
+            BrowseCommand::SetSectionCollapsed { section, collapsed } => {
+                self.sections.borrow_mut()[section as usize] = collapsed;
+                R::Changes(OpChanges {
+                    config: true,
+                    ..Default::default()
+                })
             }
             BrowseCommand::SetSavedSearches { searches } => {
                 *self.saved.borrow_mut() = searches;
@@ -973,10 +985,21 @@ fn sidebar_searches_with_modifiers_and_persists_collapse() {
         })
     ));
     assert!(!ui.sidebar_rows.iter().any(|r| r.label == "French"));
-    // Sections fold locally.
+    // Sections fold at once and the state is stored (desktop's keys).
     ui.sidebar_cursor = index(&ui, "Today");
     ui.on_key(&fake, ch('h'));
     assert!(!ui.sidebar_rows.iter().any(|r| r.label == "Due Today"));
+    assert!(matches!(
+        fake.last_browse(),
+        Some(BrowseCommand::SetSectionCollapsed {
+            section: 1,
+            collapsed: true
+        })
+    ));
+    assert_eq!(
+        *fake.sections.borrow(),
+        [false, true, false, false, false, false, false]
+    );
     ui.sidebar_cursor = index(&ui, "leech");
     ui.on_key(&fake, ch('h'));
     assert_eq!(ui.sidebar_rows[ui.sidebar_cursor].label, "Tags");
@@ -1067,4 +1090,23 @@ fn helpers_fit_text_and_share_widths() {
         .to_vec();
     assert_eq!(column_widths(&keys, 52), [20, 10, 20]);
     assert_eq!(strip_type_answer("a [[type:Back]] b"), "a  b");
+}
+
+#[test]
+fn stored_section_state_and_default_search_apply_on_open() {
+    let fake = Fake::new(4);
+    *fake.sections.borrow_mut() = [true, false, false, false, false, false, true];
+    fake.settings.borrow_mut().default_search = "  tag:leech ".into();
+    let ui = open(&fake);
+    assert_eq!(ui.query(), "tag:leech");
+    let label = |l: &str| ui.sidebar_rows.iter().find(|r| r.label == l).cloned();
+    assert!(label("Saved Searches").unwrap().collapsed);
+    assert!(label("Due cards").is_none());
+    assert!(label("Tags").unwrap().collapsed);
+    assert!(label("Untagged").is_none());
+    assert!(!label("Today").unwrap().collapsed);
+    // An empty default means the current deck.
+    fake.settings.borrow_mut().default_search = String::new();
+    let ui = open(&fake);
+    assert_eq!(ui.query(), "deck:current");
 }

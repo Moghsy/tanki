@@ -1,0 +1,105 @@
+Search: tag:x                                                           [Cards]
+▾ Saved Searches         │  Sort Field…     Card        Due     Deck
+    Due cards            │  Front 1        Card 1    2026-11-14 Lang::French
+▾ Today                  │ ⚑Front 2        Card 1    2026-11-14 Lang::French
+    Due Today            │ ★Front 3        Card 1    2026-11-14 Lang::French
+    Added Today          │ !Front 4        Card 1    2026-11-14 Lang::French
+    Edited Today         │ ~Front 5        Card 1    2026-11-14 Lang::French
+    Studied Today        │  Front 6        Card 1    2026-11-14 Lang::French
+    First Review         │
+    Rescheduled          │
+    Again Today          │
+    Overdue              │
+▾ Flags                  │
+    No Flag              │
+    Red                  │
+    Orange               │
+    Green                │
+    Blue                 │
+    Pink                 │
+    Turquoise            │
+    Purple               │
+6 cards shown
+/ search  Tab sidebar  Space select  v range  C-a all  * invert  Enter edit  p p
+ fixture │ 1 0 0                                         ♪ on │ ▣ text │ ? help
+
+Buffer {
+    area: Rect { x: 0, y: 0, width: 80, height: 24 },
+    content: [
+        "Search: tag:x                                                           [Cards] ",
+        "▾ Saved Searches         │  Sort Field…     Card        Due     Deck            ",
+        "    Due cards            │  Front 1        Card 1    2026-11-14 Lang::French    ",
+        "▾ Today                  │ ⚑Front 2        Card 1    2026-11-14 Lang::French    ",
+        "    Due Today            │ ★Front 3        Card 1    2026-11-14 Lang::French    ",
+        "    Added Today          │ !Front 4        Card 1    2026-11-14 Lang::French    ",
+        "    Edited Today         │ ~Front 5        Card 1    2026-11-14 Lang::French    ",
+        "    Studied Today        │  Front 6        Card 1    2026-11-14 Lang::French    ",
+        "    First Review         │                                                      ",
+        "    Rescheduled          │                                                      ",
+        "    Again Today          │                                                      ",
+        "    Overdue              │                                                      ",
+        "▾ Flags                  │                                                      ",
+        "    No Flag              │                                                      ",
+        "    Red                  │                                                      ",
+        "    Orange               │                                                      ",
+        "    Green                │                                                      ",
+        "    Blue                 │                                                      ",
+        "    Pink                 │                                                      ",
+        "    Turquoise            │                                                      ",
+        "    Purple               │                                                      ",
+        "6 cards shown                                                                   ",
+        "/ search  Tab sidebar  Space select  v range  C-a all  * invert  Enter edit  p p",
+        " fixture │ 1 0 0                                         ♪ on │ ▣ text │ ? help ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 71, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 25, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 28, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD | UNDERLINED,
+        x: 39, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 40, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD | UNDERLINED,
+        x: 52, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 53, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD | UNDERLINED,
+        x: 63, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 64, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD | UNDERLINED,
+        x: 0, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 26, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
+        x: 0, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 25, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 26, y: 3, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 26, y: 4, fg: Rgb(130, 120, 255), bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 26, y: 5, fg: Yellow, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 6, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 26, y: 6, fg: Rgb(190, 120, 30), bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 7, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 12, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 25, y: 12, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 21, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
+        x: 0, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 1, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 10, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 13, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 23, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 28, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 37, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 38, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 46, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 49, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 55, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 56, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 65, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 70, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 77, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 78, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 0, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: BOLD,
+        x: 9, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 11, y: 23, fg: LightBlue, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 12, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 13, y: 23, fg: DarkGray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 14, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 15, y: 23, fg: DarkGray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 16, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+    ]
+}

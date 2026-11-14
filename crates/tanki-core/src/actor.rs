@@ -298,6 +298,12 @@ impl From<anki::error::AnkiError> for CoreError {
                 Self::Locked
             }
             anki::error::AnkiError::Interrupted => Self::Interrupted,
+            // Search syntax errors and bad regexes are the user's input:
+            // Anki's (English) message without Fluent's isolation marks.
+            anki::error::AnkiError::SearchError { .. } => Self::Invalid(
+                anki_i18n::without_unicode_isolation(&e.message(&anki_i18n::I18n::template_only())),
+            ),
+            anki::error::AnkiError::InvalidRegex { info } => Self::Invalid(info.clone()),
             _ => Self::Other(e.to_string()),
         }
     }

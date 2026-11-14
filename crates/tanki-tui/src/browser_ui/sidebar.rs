@@ -18,6 +18,23 @@ pub enum Section {
     Tags,
 }
 
+impl Section {
+    /// Desktop's order, the index into `SidebarData::section_collapsed`.
+    pub const ALL: [Section; 7] = [
+        Section::Saved,
+        Section::Today,
+        Section::Flags,
+        Section::CardState,
+        Section::Decks,
+        Section::Notetypes,
+        Section::Tags,
+    ];
+
+    pub fn index(self) -> u8 {
+        Self::ALL.iter().position(|s| *s == self).unwrap_or(0) as u8
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ItemKind {
     Section(Section),
@@ -39,8 +56,8 @@ pub struct Row {
     pub collapsed: bool,
 }
 
-/// Collapse state the collection does not keep for tanki (sections) or at
-/// all (note types).
+/// Collapse state of the sections (a copy of desktop's `COLLAPSE_*` keys,
+/// loaded with the sidebar) and of note types (not kept anywhere).
 #[derive(Debug, Clone, Default)]
 pub struct LocalState {
     pub collapsed_sections: HashSet<Section>,
@@ -290,6 +307,7 @@ mod tests {
     #[test]
     fn sections_searches_and_collapse() {
         let data = SidebarData {
+            section_collapsed: [false; 7],
             saved_searches: vec![("Mine".into(), "tag:x".into())],
             decks: vec![SidebarDeck {
                 id: 5,
