@@ -66,6 +66,12 @@ enum CliCommand {
     Decks,
     /// Probe terminal capabilities and display a test image.
     Doctor,
+    /// Import an .apkg deck package (never replaces the collection).
+    Import(package_commands::ImportArgs),
+    /// Export notes as .apkg, or the whole collection as .colpkg.
+    Export(package_commands::ExportArgs),
+    /// Create, list or restore backups (restore replaces the collection).
+    Backup(package_commands::BackupArgs),
     /// Dump fixture card HTML/audio for the Phase 0 comparison harness.
     #[command(hide = true)]
     FixtureDump,
@@ -162,6 +168,21 @@ fn run(args: Args) -> Result<()> {
             })?;
             println!("{}", report.summary);
         }
+        Some(CliCommand::Import(command)) => {
+            with_collection(&profile_path(&args)?, args.confirm_closed, |actor| {
+                package_commands::run_import(actor, command, args.json)
+            })?;
+        }
+        Some(CliCommand::Export(command)) => {
+            with_collection(&profile_path(&args)?, args.confirm_closed, |actor| {
+                package_commands::run_export(actor, command, args.json)
+            })?;
+        }
+        Some(CliCommand::Backup(command)) => {
+            with_collection(&profile_path(&args)?, args.confirm_closed, |actor| {
+                package_commands::run_backup(actor, command, args.json)
+            })?;
+        }
         Some(CliCommand::FixtureDump) => {
             with_collection(&profile_path(&args)?, args.confirm_closed, |actor| {
                 let Response::CardIds(ids) = actor.execute(Command::Search {
@@ -228,6 +249,9 @@ fn run(args: Args) -> Result<()> {
 }
 /// PLAN 9 exit codes; see `docs/implementation/phase-2-interfaces.md`.
 fn exit_code(error: &(dyn std::error::Error + 'static)) -> u8 {
+    if let Some(error) = error.downcast_ref::<package_commands::PackageError>() {
+        return error.exit_code();
+    }
     match error.downcast_ref::<CoreError>() {
         Some(CoreError::Locked | CoreError::InUse(_)) => 20,
         Some(CoreError::SchemaChangeRequired) => 24,

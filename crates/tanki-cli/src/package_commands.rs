@@ -6,8 +6,6 @@
 //! `--yes` or a typed confirmation; existing export files are only
 //! overwritten with `--force`.
 // The lead wires these entry points into `main.rs`.
-#![allow(dead_code)]
-
 use clap::{Args, Subcommand, ValueEnum};
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};

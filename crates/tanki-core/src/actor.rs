@@ -358,7 +358,6 @@ fn backup_and_relock_with(
 /// unconfirmed call fails with `SchemaChangeRequired`, including on
 /// collections that never synced (the library cannot tell those apart from
 /// clean ones without private timestamps). Reads only; no SQL.
-#[allow(dead_code)] // Callers arrive with the Packages stream.
 pub(crate) fn confirm_schema_change(col: &mut Collection, confirmed: bool) -> Result<()> {
     use anki_proto::sync::sync_status_response::Required;
     if confirmed || col.sync_status_offline()? == Required::FullSync {

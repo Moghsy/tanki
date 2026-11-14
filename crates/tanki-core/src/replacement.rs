@@ -7,7 +7,7 @@
 //! either file open:
 //!
 //! 1. The caller has closed the live collection after a completed backup, and
-//!    the staged collection is closed too, so neither has a WAL or shm file.
+//!    the staged collection is closed too, so neither has a WAL file.
 //! 2. Open both files and take Linux open-file-description (OFD) write locks
 //!    over SQLite's lock bytes (pending, reserved and the shared range). OFD
 //!    locks conflict with the POSIX locks SQLite uses in every process, so
@@ -15,7 +15,8 @@
 //! 3. Re-check `/proc` for other holders of either file or their companions;
 //!    an SQLite connection that lost its lock still has the file open.
 //! 4. Check that the locked descriptors are still the files at the two paths,
-//!    on one filesystem, and that no WAL appeared.
+//!    on one filesystem, and that no WAL appeared. Remove stale shm index
+//!    files, which belong to the old file and which SQLite would rebuild.
 //! 5. Move staged media in, then rename the staged collection over the live
 //!    one and sync the folder. Failure before the rename leaves the live
 //!    collection untouched.
@@ -105,14 +106,14 @@ pub(crate) fn install(profile: &Path, stage: &Path, media: bool) -> Result<()> {
     use std::os::unix::fs::MetadataExt;
     let live = profile.join("collection.anki2");
     let staged = stage.join("collection.anki2");
-    let companions = |dir: &Path| {
-        ["collection.anki2-wal", "collection.anki2-shm"]
-            .into_iter()
-            .any(|name| std::fs::symlink_metadata(dir.join(name)).is_ok())
-    };
+    // A WAL holds data that belongs to the old file. The shm file is only an
+    // index SQLite rebuilds on open; a clean close leaves it behind, and it is
+    // removed below once nobody else can be using it.
+    let companions =
+        |dir: &Path| std::fs::symlink_metadata(dir.join("collection.anki2-wal")).is_ok();
     if companions(profile) || companions(stage) {
         return Err(CoreError::ProfileBusy(
-            "A WAL or shm file exists beside a collection; nothing was replaced.".into(),
+            "A WAL file exists beside a collection; nothing was replaced.".into(),
         ));
     }
     for path in [&live, &staged] {
@@ -153,6 +154,12 @@ pub(crate) fn install(profile: &Path, stage: &Path, media: bool) -> Result<()> {
         return Err(CoreError::ProfileBusy(
             "The collection files changed while locking; nothing was replaced.".into(),
         ));
+    }
+    for dir in [profile, stage] {
+        let shm = dir.join("collection.anki2-shm");
+        if std::fs::symlink_metadata(&shm).is_ok() {
+            std::fs::remove_file(&shm)?;
+        }
     }
     if media {
         install_media(

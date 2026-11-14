@@ -302,3 +302,138 @@ fn killed_process_leaves_no_partial_backup() -> Result<()> {
     eprintln!("kills that landed mid-write: {interrupted_writes} of 6");
     Ok(())
 }
+
+const PLAIN_HOLDER_ENV: &str = "TANKI_TEST_PLAIN_HOLDER";
+
+/// Child: holds the file open with plain I/O (like a desktop that lost its
+/// lock, or any other reader) until stdin closes.
+#[test]
+fn plain_holder_child() {
+    let Some(file) = std::env::var_os(PLAIN_HOLDER_ENV) else {
+        return;
+    };
+    let _file = std::fs::File::open(&file).unwrap();
+    println!("ready");
+    std::io::stdout().flush().unwrap();
+    let _ = std::io::stdin().read_to_string(&mut String::new());
+    std::process::exit(0);
+}
+
+fn note_count(actor: &CollectionActor) -> Result<usize> {
+    match actor.execute(Command::Search {
+        query: String::new(),
+    })? {
+        Response::CardIds(ids) => Ok(ids.len()),
+        other => panic!("{other:?}"),
+    }
+}
+
+fn add(actor: &CollectionActor, front: &str) -> Result<()> {
+    actor.execute(Command::AddNote {
+        notetype: "Basic".into(),
+        fields: vec![front.into(), "back".into()],
+    })?;
+    Ok(())
+}
+
+fn export_colpkg(actor: &CollectionActor, path: &Path) -> Result<()> {
+    actor
+        .start_data(DataCommand::Package(PackageCommand::ExportCollection {
+            path: path.to_path_buf(),
+            media: true,
+            legacy: false,
+        }))?
+        .wait()?;
+    Ok(())
+}
+
+/// Through the actor, as the CLI does it: export, change, restore. The
+/// restored collection is the exported one, a backup was taken first, media
+/// came back, the staging folder is gone and subscribers are told to refresh.
+#[test]
+fn restore_through_the_actor_replaces_collection_and_media() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let profile = dir.path().join("p");
+    std::fs::create_dir(&profile)?;
+    let package = dir.path().join("saved.colpkg");
+    let actor = CollectionActor::open(&profile)?;
+    add(&actor, "kept")?;
+    std::fs::write(profile.join("collection.media/pic.png"), b"saved image")?;
+    export_colpkg(&actor, &package)?;
+    add(&actor, "lost")?;
+    std::fs::remove_file(profile.join("collection.media/pic.png"))?;
+    assert_eq!(note_count(&actor)?, 2);
+    let backups_before = std::fs::read_dir(profile.join("backups"))?.count();
+    let changes = actor.subscribe();
+    let restored = actor
+        .start_data(DataCommand::Package(PackageCommand::Restore {
+            path: package,
+            confirmed: true,
+        }))?
+        .wait()?;
+    assert!(matches!(restored, DataResponse::Done));
+    assert_eq!(changes.recv().unwrap(), OpChanges::everything());
+    assert_eq!(note_count(&actor)?, 1);
+    assert_eq!(
+        std::fs::read(profile.join("collection.media/pic.png"))?,
+        b"saved image"
+    );
+    assert!(std::fs::read_dir(profile.join("backups"))?.count() > backups_before);
+    assert!(std::fs::read_dir(&profile)?
+        .flatten()
+        .all(|e| !e.file_name().to_string_lossy().starts_with(".tanki-stage-")));
+    actor.close()?;
+    // The restored file reopens cleanly in a new process-equivalent open.
+    let actor = CollectionActor::open(&profile)?;
+    assert_eq!(note_count(&actor)?, 1);
+    actor.close()
+}
+
+/// PLAN 11 Phase 2 exit: restore-while-locked is refused. Another process
+/// holds the collection open (as a desktop that lost its SQLite lock would):
+/// nothing is replaced, and tanki closes the collection rather than share it.
+#[test]
+fn restore_while_another_process_holds_the_file_is_refused() -> Result<()> {
+    if !cfg!(target_os = "linux") {
+        return Ok(());
+    }
+    let dir = tempfile::tempdir()?;
+    let profile = dir.path().join("p");
+    std::fs::create_dir(&profile)?;
+    let package = dir.path().join("saved.colpkg");
+    let actor = CollectionActor::open(&profile)?;
+    export_colpkg(&actor, &package)?;
+    add(&actor, "must survive")?;
+    let file = profile.canonicalize()?.join("collection.anki2");
+    let mut child = Process::new(std::env::current_exe().unwrap())
+        .args(["--exact", "plain_holder_child", "--nocapture", "--test-threads=1"])
+        .env(PLAIN_HOLDER_ENV, &file)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    assert!(lines.any(|l| l.unwrap().trim_end().ends_with("ready")));
+    let result = actor
+        .start_data(DataCommand::Package(PackageCommand::Restore {
+            path: package,
+            confirmed: true,
+        }))?
+        .wait();
+    match result {
+        Err(CoreError::InUse(message)) => {
+            assert!(message.contains(&child.id().to_string()), "{message}")
+        }
+        other => panic!("expected InUse, got {other:?}"),
+    }
+    // The actor stopped instead of reopening beside the other process.
+    assert!(matches!(
+        actor.execute(Command::DeckTree),
+        Err(CoreError::ActorStopped)
+    ));
+    let _ = actor.close();
+    release(child);
+    let actor = CollectionActor::open(&profile)?;
+    assert_eq!(note_count(&actor)?, 1, "the live collection was not replaced");
+    actor.close()
+}

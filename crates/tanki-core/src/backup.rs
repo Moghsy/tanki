@@ -86,13 +86,19 @@ pub(crate) fn clear_incoming(folder: &Path) -> Result<()> {
 fn install(incoming: &Path, folder: &Path) -> Result<()> {
     for entry in fs::read_dir(incoming)? {
         let entry = entry?;
-        let name = entry.file_name();
-        if name.to_str().and_then(datetime_from_file_name).is_none() {
+        let Some(mut time) = entry.file_name().to_str().and_then(datetime_from_file_name) else {
             continue;
-        }
+        };
         fs::File::open(entry.path())?.sync_all()?;
-        // Same-second names replace each other, as in Anki.
-        fs::rename(entry.path(), folder.join(&name))?;
+        // Names have one-second resolution; in Anki a second backup within
+        // the same second replaces the first. Keep both: take the next free
+        // second instead.
+        let mut target = folder.join(time.format(FORMAT).to_string());
+        while fs::symlink_metadata(&target).is_ok() {
+            time += chrono::Duration::seconds(1);
+            target = folder.join(time.format(FORMAT).to_string());
+        }
+        fs::rename(entry.path(), target)?;
     }
     fs::File::open(folder)?.sync_all()?;
     Ok(())
