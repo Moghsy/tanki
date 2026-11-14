@@ -473,9 +473,14 @@ mod tests {
     #[test]
     fn redirect_targets_are_validated() {
         assert_eq!(checked_new_endpoint(None).unwrap(), None);
+        // Normalized as Anki normalizes endpoints (`join("./")`).
+        assert_eq!(
+            checked_new_endpoint(Some("http://127.0.0.1:9/a/".into())).unwrap(),
+            Some("http://127.0.0.1:9/a/".into())
+        );
         assert_eq!(
             checked_new_endpoint(Some("http://127.0.0.1:9/a".into())).unwrap(),
-            Some("http://127.0.0.1:9/a/".into())
+            Some("http://127.0.0.1:9/".into())
         );
         for bad in [
             "https://sync.ankiweb.net/",
@@ -506,7 +511,7 @@ mod tests {
             hkey: String::new(),
             timeout_secs: 0,
         };
-        assert!(is_auth_error(&checked_auth(&auth).unwrap_err()));
+        assert!(is_auth_error(&checked_auth(&auth).err().unwrap()));
         let ankiweb = SyncCredentials {
             endpoint: "https://sync.ankiweb.net/".into(),
             hkey: "k".into(),
