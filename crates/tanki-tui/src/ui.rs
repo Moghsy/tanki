@@ -1,5 +1,5 @@
 //! Drawing: every screen, overlay and the status line, into a ratatui frame.
-use crate::app::{graphics_name, App, ChoiceValue, Overlay, PromptKind, Screen};
+use crate::app::{graphics_name, App, ChoiceValue, Layer, Overlay, PromptKind, Screen};
 use crate::backend::DeckRow;
 use crate::keymap::{Action, Scope};
 use crate::reviewer::{next_learn_message, Phase};
@@ -78,7 +78,9 @@ impl App<'_> {
         let main = Rect::new(area.x, area.y, area.width, area.height - 1);
         let status = Rect::new(area.x, area.bottom() - 1, area.width, 1);
         let zoom = matches!(self.overlay, Some(Overlay::Zoom { .. }));
-        if !zoom {
+        if !self.layers.is_empty() {
+            self.draw_layer(frame, main);
+        } else if !zoom {
             match self.screen.scope() {
                 Scope::Decks => self.draw_decks(frame, main),
                 Scope::Overview => self.draw_overview(frame, main),
@@ -97,6 +99,31 @@ impl App<'_> {
         self.services
             .renderer
             .finish_frame(frame.buffer_mut(), self.overlay.is_none());
+    }
+
+    // ---- add / browser layers ----------------------------------------------
+
+    fn draw_layer(&mut self, frame: &mut Frame, area: Rect) {
+        let renderer = &*self.services.renderer;
+        let backend = &self.backend;
+        let buf = frame.buffer_mut();
+        match self.layers.last_mut() {
+            Some(Layer::Add(ui)) => {
+                // The form, and its context keys on the last row.
+                let form = Rect {
+                    height: area.height.saturating_sub(1),
+                    ..area
+                };
+                ui.render(form, buf, renderer);
+                let hints = Line::from(Span::styled(ui.hints(), dim()));
+                hints.render_into(buf, Rect::new(area.x, area.bottom() - 1, area.width, 1));
+            }
+            Some(Layer::Browser(ui)) => {
+                ui.prepare(backend, area);
+                ui.render(area, buf, renderer);
+            }
+            None => {}
+        }
     }
 
     // ---- deck list ---------------------------------------------------------
@@ -890,10 +917,20 @@ impl App<'_> {
     fn draw_help(&self, frame: &mut Frame, area: Rect, scroll: usize) {
         let width = area.width.saturating_sub(4).min(76);
         let height = area.height.saturating_sub(2);
-        let title = format!("Keys: {}", self.screen.scope().title());
-        let inner = self.popup(frame, area, width, height, &title);
         let active = self.scopes();
+        let title = format!("Keys: {}", active[0].title());
+        let inner = self.popup(frame, area, width, height, &title);
         let mut lines: Vec<Line> = Vec::new();
+        // The add / browser widgets' own key tables come first.
+        if let Some(keys) = self.layer_keys() {
+            for (keys, what) in keys {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  {keys:<22} "), Style::default().fg(Color::Cyan)),
+                    Span::raw(what),
+                ]));
+            }
+            lines.push(Line::default());
+        }
         for scope in &active {
             lines.push(Line::from(Span::styled(
                 scope.title(),

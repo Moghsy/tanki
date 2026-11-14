@@ -8,7 +8,8 @@ use tanki_core::{
     FieldInfo, ForgetDefaults, NotetypeInfo, RepositionDefaults, SidebarDeck, TagNode, TemplateInfo,
 };
 
-struct Fake {
+/// Also used by the app's Phase 3 tests.
+pub(crate) struct Fake {
     cards: usize,
     log: RefCell<Vec<Command>>,
     settings: RefCell<BrowserSettings>,
@@ -31,7 +32,7 @@ fn table_changes() -> OpChanges {
 }
 
 impl Fake {
-    fn new(cards: usize) -> Self {
+    pub(crate) fn new(cards: usize) -> Self {
         Self {
             cards,
             log: RefCell::new(Vec::new()),
@@ -56,7 +57,7 @@ impl Fake {
         }
     }
 
-    fn logged(&self, pred: impl Fn(&Command) -> bool) -> Vec<Command> {
+    pub(crate) fn logged(&self, pred: impl Fn(&Command) -> bool) -> Vec<Command> {
         self.log
             .borrow()
             .iter()

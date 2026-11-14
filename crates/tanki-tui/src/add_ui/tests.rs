@@ -37,17 +37,18 @@ fn notetype(id: i64, name: &str, fields: &[&str], kind: NotetypeKind) -> Notetyp
     }
 }
 
-struct Fake {
+/// Also used by the app's Phase 3 tests.
+pub(crate) struct Fake {
     notetypes: RefCell<Vec<NotetypeInfo>>,
-    notes: RefCell<HashMap<i64, NoteData>>,
+    pub(crate) notes: RefCell<HashMap<i64, NoteData>>,
     next_id: RefCell<i64>,
     log: RefCell<Vec<String>>,
     /// Makes the next `UpdateNotes` report a conflict.
-    conflict: RefCell<bool>,
+    pub(crate) conflict: RefCell<bool>,
 }
 
 impl Fake {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let mut basic = notetype(1, "Basic", &["Front", "Back"], NotetypeKind::Normal);
         basic.fields[1].description = "The answer".into();
         Self {
@@ -71,14 +72,14 @@ impl Fake {
             conflict: RefCell::new(false),
         }
     }
-    fn count(&self, prefix: &str) -> usize {
+    pub(crate) fn count(&self, prefix: &str) -> usize {
         self.log
             .borrow()
             .iter()
             .filter(|l| l.starts_with(prefix))
             .count()
     }
-    fn insert(&self, note: NoteData) -> i64 {
+    pub(crate) fn insert(&self, note: NoteData) -> i64 {
         let id = *self.next_id.borrow();
         *self.next_id.borrow_mut() += 1;
         self.notes.borrow_mut().insert(
@@ -193,6 +194,12 @@ impl Backend for Fake {
                     .get(&id)
                     .cloned()
                     .ok_or(CoreError::Invalid("gone".into()))?,
+            ),
+            NoteCommand::GetNotes { ids } => EditResponse::Notes(
+                ids.iter()
+                    .map(|id| self.notes.borrow().get(id).cloned())
+                    .collect::<Option<Vec<_>>>()
+                    .ok_or(CoreError::Invalid("no note".into()))?,
             ),
             NoteCommand::UpdateNotes { updates } => {
                 let mut report = UpdateReport::default();

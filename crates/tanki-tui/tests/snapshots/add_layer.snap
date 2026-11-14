@@ -1,0 +1,77 @@
+Add · Type: Basic (Ctrl+N) · Deck: Default (Ctrl+D)
+Front
+dos
+
+
+
+
+
+
+
+
+
+
+
+
+
+Back
+The answer
+Tags
+
+
+
+Ctrl+Enter add · Tab next field · Ctrl+N type · Ctrl+D deck · Alt+S sticky · Alt
+ fixture │ 7 1 15                                        ♪ on │ ▣ text │ ? help
+
+Buffer {
+    area: Rect { x: 0, y: 0, width: 80, height: 24 },
+    content: [
+        "Add · Type: Basic (Ctrl+N) · Deck: Default (Ctrl+D)                             ",
+        "Front                                                                           ",
+        "dos                                                                             ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "Back                                                                            ",
+        "The answer                                                                      ",
+        "Tags                                                                            ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "Ctrl+Enter add · Tab next field · Ctrl+N type · Ctrl+D deck · Alt+S sticky · Alt",
+        " fixture │ 7 1 15                                        ♪ on │ ▣ text │ ? help ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 51, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD | UNDERLINED,
+        x: 5, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
+        x: 4, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 16, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 4, y: 16, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 17, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 10, y: 17, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 18, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 4, y: 18, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 22, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: BOLD,
+        x: 9, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 11, y: 23, fg: LightBlue, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 12, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 13, y: 23, fg: LightRed, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 14, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 15, y: 23, fg: LightGreen, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+        x: 17, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
+    ]
+}

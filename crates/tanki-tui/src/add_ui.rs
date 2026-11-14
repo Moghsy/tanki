@@ -20,7 +20,7 @@ mod editor_cmds;
 mod media;
 mod render;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use crate::backend::Backend;
 use crate::completion::{self, Candidate, Completion, CompletionOutcome, Proposal};

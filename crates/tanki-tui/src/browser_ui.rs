@@ -23,7 +23,7 @@
 mod dialog;
 mod sidebar;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use crate::backend::Backend;
 use crate::completion::{Completion, CompletionOutcome, SearchVocabulary};

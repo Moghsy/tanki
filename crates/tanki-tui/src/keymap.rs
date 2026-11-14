@@ -16,10 +16,15 @@ pub enum Scope {
     Zoom,
     /// Lists inside overlays (menus, choices).
     Menu,
+    /// The add / edit note screen. Its widget has its own key table
+    /// (`add_ui::KEYS`); only keys bound here are taken from it.
+    Add,
+    /// The browser; its widget has its own key table too.
+    Browser,
 }
 
 impl Scope {
-    pub const ALL: [Scope; 7] = [
+    pub const ALL: [Scope; 9] = [
         Scope::Global,
         Scope::Decks,
         Scope::Overview,
@@ -27,6 +32,8 @@ impl Scope {
         Scope::Congrats,
         Scope::Zoom,
         Scope::Menu,
+        Scope::Add,
+        Scope::Browser,
     ];
     pub fn name(self) -> &'static str {
         match self {
@@ -37,6 +44,8 @@ impl Scope {
             Scope::Congrats => "congrats",
             Scope::Zoom => "zoom",
             Scope::Menu => "menu",
+            Scope::Add => "add",
+            Scope::Browser => "browser",
         }
     }
     pub fn from_name(name: &str) -> Option<Self> {
@@ -51,6 +60,8 @@ impl Scope {
             Scope::Congrats => "Finished",
             Scope::Zoom => "Image zoom",
             Scope::Menu => "Menus",
+            Scope::Add => "Add / edit note",
+            Scope::Browser => "Browser",
         }
     }
 }
@@ -140,6 +151,9 @@ actions! {
     Export = "export", "Export a package (.apkg deck, .colpkg collection)";
     BackupNow = "backup-now", "Create a backup now";
     RestoreBackup = "restore-backup", "Restore the collection from a backup...";
+    AddNote = "add-note", "Add notes";
+    Browse = "browse", "Browse cards and notes";
+    EditNote = "edit-note", "Edit the current note";
     NextImage = "next-image", "Next image";
     PrevImage = "previous-image", "Previous image";
 }
@@ -316,6 +330,9 @@ pub const DEFAULTS: &[(&str, &str, &str)] = &[
     ("global", "ctrl+y", "redo"),
     ("global", "ctrl+g", "cycle-graphics"),
     ("global", "esc", "back"),
+    // Main window shortcuts (R4 §22.1): Add, Browse.
+    ("global", "a", "add-note"),
+    ("global", "b", "browse"),
     // Deck list (R4 §4) with vim-style movement.
     ("decks", "up", "up"),
     ("decks", "k", "up"),
@@ -415,6 +432,7 @@ pub const DEFAULTS: &[(&str, &str, &str)] = &[
     ("review", "home", "top"),
     ("review", "end", "bottom"),
     ("review", "q", "back"),
+    ("review", "e", "edit-note"),
     // Congrats.
     ("congrats", "u", "unbury"),
     ("congrats", "r", "refresh"),
@@ -443,6 +461,11 @@ pub const DEFAULTS: &[(&str, &str, &str)] = &[
     ("menu", "space", "select"),
     ("menu", "esc", "back"),
     ("menu", "q", "back"),
+    // The add and browser screens give every other key to their widgets.
+    ("add", "ctrl+q", "quit"),
+    ("add", "f1", "help"),
+    ("browser", "ctrl+q", "quit"),
+    ("browser", "f1", "help"),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -710,6 +733,29 @@ mod tests {
         assert_eq!(km.hint(&[Scope::Review], Action::Flag(2)), "Ctrl+2");
         assert!(km.actions(&active).contains(&Action::StudyDeck));
         assert!(!km.actions(&active).contains(&Action::Again));
+    }
+
+    #[test]
+    fn phase3_screens_open_with_desktop_keys() {
+        let km = Keymap::default();
+        let key = |k: &str| Chord::parse(k).unwrap();
+        for scope in [Scope::Decks, Scope::Overview, Scope::Congrats] {
+            let active = [scope, Scope::Global];
+            assert_eq!(km.lookup(&active, &key("a")), Some(Action::AddNote));
+            assert_eq!(km.lookup(&active, &key("b")), Some(Action::Browse));
+        }
+        let review = [Scope::Review, Scope::Global];
+        assert_eq!(km.lookup(&review, &key("e")), Some(Action::EditNote));
+        assert_eq!(km.lookup(&review, &key("b")), Some(Action::Browse));
+        // The widgets' scopes take only these keys; typing stays theirs.
+        for scope in [Scope::Add, Scope::Browser] {
+            assert_eq!(km.lookup(&[scope], &key("ctrl+q")), Some(Action::Quit));
+            assert_eq!(km.lookup(&[scope], &key("f1")), Some(Action::Help));
+            for k in ["a", "q", "esc", "?", "ctrl+c", "tab"] {
+                assert_eq!(km.lookup(&[scope], &key(k)), None, "{k}");
+            }
+            assert_eq!(Scope::from_name(scope.name()), Some(scope));
+        }
     }
 
     #[test]

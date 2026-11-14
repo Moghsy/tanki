@@ -42,7 +42,7 @@ impl App<'_> {
         self.job.is_some() || self.sync_ui.is_visible() || self.package_ui.is_some()
     }
 
-    fn profile_key(&self) -> String {
+    pub(super) fn profile_key(&self) -> String {
         self.profile.dir.to_string_lossy().into_owned()
     }
 

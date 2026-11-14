@@ -1,5 +1,7 @@
 //! Terminal ownership and the event loop. The probe runs before the sole
 //! input reader. Both the reader and raw terminal are joined/restored on error.
+//! `$EDITOR` runs with the reader paused and the terminal restored, then the
+//! screen is taken back and repainted.
 use crate::app::{App, AppEvent, Profile, Services, Start};
 use crate::keymap::Keymap;
 use crate::links::{HyperlinkBackend, LinkedRenderer, Links};
@@ -19,7 +21,7 @@ use ratatui::Terminal;
 use std::io::{self, IsTerminal, Write};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    mpsc, Arc,
+    mpsc, Arc, Mutex,
 };
 use std::thread;
 use std::time::{Duration, Instant};
@@ -86,10 +88,18 @@ pub fn run(actor: &CollectionActor, options: Options) -> io::Result<()> {
     let mut app = App::new(actor, services, profile, options.start, Now::current());
     app.set_keymap(options.keymap);
     app.set_config(options.config);
+    let gate = Arc::new(Gate::default());
+    let keyboard = capabilities.keyboard_enhancement;
+    let editor_gate = gate.clone();
+    app.set_editor(Box::new(move |command, path| {
+        suspended(&editor_gate, keyboard, || {
+            crate::editor_flow::spawn_editor(command, path)
+        })
+    }));
     let _session = Session::enter(&capabilities)?;
     let mut terminal = Terminal::new(HyperlinkBackend::new(io::stdout(), links))?;
     terminal.clear()?;
-    let reader = Reader::start()?;
+    let reader = Reader::start(gate)?;
     let result = (|| {
         while !app.should_quit() {
             while let Ok(change) = changes.try_recv() {
@@ -148,47 +158,78 @@ struct Session {
 }
 impl Session {
     fn enter(caps: &Capabilities) -> io::Result<Self> {
-        enable_raw_mode()?;
         // Install the guard before any fallible setup, so partial setup restores.
         let guard = Self {
             keyboard: caps.keyboard_enhancement,
         };
-        execute!(
-            io::stdout(),
-            EnterAlternateScreen,
-            EnableBracketedPaste,
-            EnableFocusChange,
-            EnableMouseCapture
-        )?;
-        if guard.keyboard {
-            execute!(
-                io::stdout(),
-                PushKeyboardEnhancementFlags(
-                    KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-                        | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
-                )
-            )?;
-        }
+        enter_modes(guard.keyboard)?;
         Ok(guard)
     }
 }
 impl Drop for Session {
     fn drop(&mut self) {
-        let mut out = io::stdout();
-        if self.keyboard {
-            let _ = execute!(out, PopKeyboardEnhancementFlags);
-        }
-        let _ = execute!(
-            out,
-            crossterm::terminal::EndSynchronizedUpdate,
-            DisableMouseCapture,
-            DisableFocusChange,
-            DisableBracketedPaste,
-            Show,
-            LeaveAlternateScreen
-        );
-        let _ = disable_raw_mode();
+        leave_modes(self.keyboard);
     }
+}
+
+fn enter_modes(keyboard: bool) -> io::Result<()> {
+    enable_raw_mode()?;
+    execute!(
+        io::stdout(),
+        EnterAlternateScreen,
+        EnableBracketedPaste,
+        EnableFocusChange,
+        EnableMouseCapture
+    )?;
+    if keyboard {
+        execute!(
+            io::stdout(),
+            PushKeyboardEnhancementFlags(
+                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+            )
+        )?;
+    }
+    Ok(())
+}
+
+fn leave_modes(keyboard: bool) {
+    let mut out = io::stdout();
+    if keyboard {
+        let _ = execute!(out, PopKeyboardEnhancementFlags);
+    }
+    let _ = execute!(
+        out,
+        crossterm::terminal::EndSynchronizedUpdate,
+        DisableMouseCapture,
+        DisableFocusChange,
+        DisableBracketedPaste,
+        Show,
+        LeaveAlternateScreen
+    );
+    let _ = disable_raw_mode();
+}
+
+/// Lets the editor have the terminal: while `paused`, the reader stops
+/// polling, and holding `polling` waits out a poll in progress.
+#[derive(Default)]
+struct Gate {
+    paused: AtomicBool,
+    polling: Mutex<()>,
+}
+
+/// Runs `f` with the input reader paused and the terminal in its normal
+/// state (main screen, cooked mode), then takes the screen back.
+fn suspended<T>(gate: &Gate, keyboard: bool, f: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
+    gate.paused.store(true, Ordering::SeqCst);
+    let _polling = gate.polling.lock().unwrap_or_else(|e| e.into_inner());
+    leave_modes(keyboard);
+    let result = f();
+    let resumed = enter_modes(keyboard);
+    gate.paused.store(false, Ordering::SeqCst);
+    let value = result?;
+    resumed?;
+    Ok(value)
 }
 
 fn input_event(event: Event, at: Instant) -> AppEvent {
@@ -208,7 +249,7 @@ struct Reader {
     worker: Option<thread::JoinHandle<()>>,
 }
 impl Reader {
-    fn start() -> io::Result<Self> {
+    fn start(gate: Arc<Gate>) -> io::Result<Self> {
         let (sender, events) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let requested = stop.clone();
@@ -216,6 +257,14 @@ impl Reader {
             .name("tanki-input".into())
             .spawn(move || {
                 while !requested.load(Ordering::Relaxed) {
+                    if gate.paused.load(Ordering::SeqCst) {
+                        thread::sleep(Duration::from_millis(20));
+                        continue;
+                    }
+                    let _polling = gate.polling.lock().unwrap_or_else(|e| e.into_inner());
+                    if gate.paused.load(Ordering::SeqCst) {
+                        continue;
+                    }
                     let result = event::poll(Duration::from_millis(50)).and_then(|ready| {
                         if ready {
                             event::read().map(|event| Some(input_event(event, Instant::now())))
