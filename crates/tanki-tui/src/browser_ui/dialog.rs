@@ -287,11 +287,7 @@ impl Dialog {
 
     pub fn hints(&self) -> Vec<(&'static str, &'static str)> {
         match self {
-            Dialog::Prompt(_) => vec![
-                ("Enter", "ok"),
-                ("Tab", "complete"),
-                ("Esc", "cancel"),
-            ],
+            Dialog::Prompt(_) => vec![("Enter", "ok"), ("Tab", "complete"), ("Esc", "cancel")],
             Dialog::Choice(_) => vec![("j/k", "move"), ("Enter", "choose"), ("Esc", "cancel")],
             Dialog::Columns(_) => vec![("j/k", "move"), ("Space", "show/hide"), ("Esc", "done")],
             Dialog::Forget(_) | Dialog::Reposition(_) | Dialog::FindReplace(_) => vec![
@@ -342,7 +338,9 @@ impl Dialog {
                 c.items
                     .iter()
                     .enumerate()
-                    .map(|(i, (_, label, on))| row(i == c.cursor, format!("{} {label}", check(*on))))
+                    .map(|(i, (_, label, on))| {
+                        row(i == c.cursor, format!("{} {label}", check(*on)))
+                    })
                     .collect(),
                 40,
             ),
@@ -351,11 +349,17 @@ impl Dialog {
                 vec![
                     row(
                         f.cursor == 0,
-                        format!("{} Restore original position where possible", check(f.restore_position)),
+                        format!(
+                            "{} Restore original position where possible",
+                            check(f.restore_position)
+                        ),
                     ),
                     row(
                         f.cursor == 1,
-                        format!("{} Reset repetition and lapse counts", check(f.reset_counts)),
+                        format!(
+                            "{} Reset repetition and lapse counts",
+                            check(f.reset_counts)
+                        ),
                     ),
                 ],
                 56,
@@ -370,8 +374,14 @@ impl Dialog {
                     vec![
                         row(r.cursor == 0, format!("Start position {}", r.start.text())),
                         row(r.cursor == 1, format!("Step           {}", r.step.text())),
-                        row(r.cursor == 2, format!("{} Randomize order", check(r.randomize))),
-                        row(r.cursor == 3, format!("{} Shift position of existing cards", check(r.shift))),
+                        row(
+                            r.cursor == 2,
+                            format!("{} Randomize order", check(r.randomize)),
+                        ),
+                        row(
+                            r.cursor == 3,
+                            format!("{} Shift position of existing cards", check(r.shift)),
+                        ),
                     ],
                     52,
                 )
@@ -389,7 +399,10 @@ impl Dialog {
                         row(f.cursor == 0, format!("Find:    {}", f.find.text())),
                         row(f.cursor == 1, format!("Replace: {}", f.replace.text())),
                         row(f.cursor == 2, format!("In:      ‹ {} ›", f.scopes[f.scope])),
-                        row(f.cursor == 3, format!("{} Treat input as regular expression", check(f.regex))),
+                        row(
+                            f.cursor == 3,
+                            format!("{} Treat input as regular expression", check(f.regex)),
+                        ),
                         row(f.cursor == 4, format!("{} Match case", check(f.match_case))),
                     ],
                     60,
@@ -400,7 +413,12 @@ impl Dialog {
                 vec![
                     Line::raw(c.message.clone()),
                     Line::raw(""),
-                    Line::from(vec![Span::styled("y", bold), Span::raw(" yes   "), Span::styled("n", bold), Span::raw(" no")]),
+                    Line::from(vec![
+                        Span::styled("y", bold),
+                        Span::raw(" yes   "),
+                        Span::styled("n", bold),
+                        Span::raw(" no"),
+                    ]),
                 ],
                 50,
             ),

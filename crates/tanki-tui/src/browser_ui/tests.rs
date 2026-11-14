@@ -5,8 +5,7 @@ use crate::services::PlainTextRenderer;
 use crate::testing::buffer_text;
 use std::cell::{Cell, RefCell};
 use tanki_core::{
-    FieldInfo, ForgetDefaults, NotetypeInfo, RepositionDefaults, SidebarDeck, TagNode,
-    TemplateInfo,
+    FieldInfo, ForgetDefaults, NotetypeInfo, RepositionDefaults, SidebarDeck, TagNode, TemplateInfo,
 };
 
 struct Fake {
@@ -55,7 +54,27 @@ impl Fake {
     }
 
     fn logged(&self, pred: impl Fn(&Command) -> bool) -> Vec<Command> {
-        self.log.borrow().iter().filter(|c| pred(c)).cloned().collect()
+        self.log
+            .borrow()
+            .iter()
+            .filter(|c| pred(c))
+            .cloned()
+            .collect()
+    }
+
+    /// The last command other than the row and preview fetches of `prepare`.
+    fn last(&self) -> Option<Command> {
+        self.log
+            .borrow()
+            .iter()
+            .rev()
+            .find(|c| {
+                !matches!(
+                    c,
+                    Command::Browse(BrowseCommand::Rows { .. }) | Command::Render { .. }
+                )
+            })
+            .cloned()
     }
 
     fn last_browse(&self) -> Option<BrowseCommand> {
@@ -76,7 +95,11 @@ impl Fake {
         ColumnInfo {
             key: key.into(),
             cards_label: label.into(),
-            notes_label: if key == "template" { "Cards".into() } else { label.into() },
+            notes_label: if key == "template" {
+                "Cards".into()
+            } else {
+                label.into()
+            },
             sort_cards: cards,
             sort_notes: cards,
             centered,
@@ -147,7 +170,11 @@ impl Fake {
                     other => other.into(),
                 },
                 rtl: false,
-                elide: if key == "deck" { Elide::Middle } else { Elide::Right },
+                elide: if key == "deck" {
+                    Elide::Middle
+                } else {
+                    Elide::Right
+                },
             })
             .collect();
         let color = match (mode, id) {
@@ -216,9 +243,17 @@ impl Fake {
                 }],
                 ..Default::default()
             }],
-            flag_names: ["Red", "Orange", "Green", "Blue", "Pink", "Turquoise", "Purple"]
-                .map(String::from)
-                .to_vec(),
+            flag_names: [
+                "Red",
+                "Orange",
+                "Green",
+                "Blue",
+                "Pink",
+                "Turquoise",
+                "Purple",
+            ]
+            .map(String::from)
+            .to_vec(),
         }
     }
 
@@ -238,7 +273,12 @@ impl Fake {
                 Self::column("deck", "Deck", Some(SortDirection::Ascending), false),
                 Self::column("note", "Note", Some(SortDirection::Ascending), false),
                 Self::column("question", "Question", None, false),
-                Self::column("noteFld", "Sort Field", Some(SortDirection::Ascending), false),
+                Self::column(
+                    "noteFld",
+                    "Sort Field",
+                    Some(SortDirection::Ascending),
+                    false,
+                ),
                 Self::column("noteTags", "Tags", Some(SortDirection::Ascending), false),
                 Self::column("template", "Card", Some(SortDirection::Descending), true),
             ]),
@@ -266,7 +306,9 @@ impl Fake {
                 })
             }
             BrowseCommand::ReplaceSearch { replacement, .. } => R::Text(replacement),
-            BrowseCommand::Search { query, mode, order } => R::Ids(self.search(&query, mode, &order)),
+            BrowseCommand::Search { query, mode, order } => {
+                R::Ids(self.search(&query, mode, &order))
+            }
             BrowseCommand::Rows { mode, columns, ids } => {
                 self.rows_requested
                     .set(self.rows_requested.get() + ids.len());
@@ -351,9 +393,9 @@ impl Backend for Fake {
                     ..Default::default()
                 },
             }),
-            Command::SetFlag { .. }
-            | Command::SetMarked { .. }
-            | Command::BuryOrSuspend { .. } => Response::Changes(table_changes()),
+            Command::SetFlag { .. } | Command::SetMarked { .. } | Command::BuryOrSuspend { .. } => {
+                Response::Changes(table_changes())
+            }
             Command::DeleteNotes { note_ids } => {
                 self.deleted_notes.borrow_mut().extend(note_ids);
                 Response::Changes(table_changes())
@@ -429,20 +471,20 @@ fn opens_on_the_default_search_and_draws_the_table() {
     assert_eq!(
         text,
         [
-            "Search: deck:current                                                                       [Cards]",
-            "▾ Saved Searches           │  Sort Field ▲                 Card        Due     Deck",
-            "    Due cards              │  Front 1                      Card 1  2026-11-14  Lang::French",
-            "▾ Today                    │ ⚑Front 2                      Card 1  2026-11-14  Lang::French",
-            "    Due Today              │ ★Front 3                      Card 1  2026-11-14  Lang::French",
-            "    Added Today            │ !Front 4                      Card 1  2026-11-14  Lang::French",
-            "    Edited Today           │ ~Front 5                      Card 1  2026-11-14  Lang::French",
-            "    Studied Today          │  Front 6                      Card 1  2026-11-14  Lang::French",
-            "    First Review           │  Front 7                      Card 1  2026-11-14  Lang::French",
-            "    Rescheduled            │  Front 8                      Card 1  2026-11-14  Lang::French",
+            "Search: deck:current                                                                        [Cards]",
+            "▾ Saved Searches           │  Sort Field ▲                      Card        Due     Deck",
+            "    Due cards              │  Front 1                          Card 1    2026-11-14 Lang::French",
+            "▾ Today                    │ ⚑Front 2                          Card 1    2026-11-14 Lang::French",
+            "    Due Today              │ ★Front 3                          Card 1    2026-11-14 Lang::French",
+            "    Added Today            │ !Front 4                          Card 1    2026-11-14 Lang::French",
+            "    Edited Today           │ ~Front 5                          Card 1    2026-11-14 Lang::French",
+            "    Studied Today          │  Front 6                          Card 1    2026-11-14 Lang::French",
+            "    First Review           │  Front 7                          Card 1    2026-11-14 Lang::French",
+            "    Rescheduled            │  Front 8                          Card 1    2026-11-14 Lang::French",
             "    Again Today            │",
             "    Overdue                │",
             "8 cards shown",
-            "/ search  Tab sidebar  Space select  v range  C-a all  * invert  Enter edit  p preview  P side  M",
+            "/ search  Tab sidebar  Space select  v range  C-a all  * invert  Enter edit  p preview  P side  M ca",
         ]
     );
     // Cursor row reversed; row colours from Anki's precedence.
@@ -456,7 +498,11 @@ fn rows_are_fetched_lazily_for_the_visible_window() {
     let fake = Fake::new(50_000);
     let mut ui = open(&fake);
     assert_eq!(ui.ids().len(), 50_000);
-    assert_eq!(fake.rows_requested.get(), 0, "nothing fetched before a draw");
+    assert_eq!(
+        fake.rows_requested.get(),
+        0,
+        "nothing fetched before a draw"
+    );
     draw(&mut ui, &fake, 100, 30);
     let first = fake.rows_requested.get();
     assert!(first > 0 && first <= 27 + OVERSCAN, "{first}");
@@ -486,8 +532,8 @@ fn search_bar_completes_validates_and_records_history() {
     ui.on_key(&fake, ctrl('u'));
     type_text(&mut ui, &fake, "tag:le");
     let (text, _) = draw(&mut ui, &fake, 100, 14);
-    assert_eq!(text[0].trim_end(), "Search: tag:le                                                                             [Cards]".trim_end());
-    assert!(text[1].contains("tag:leech"), "{text:?}");
+    assert!(text[0].starts_with("Search: tag:le ") && text[0].ends_with("[Cards]"));
+    assert!(text.iter().any(|l| l.contains("│tag:leech")), "{text:?}");
     ui.on_key(&fake, key(KeyCode::Enter)); // accept the completion
     let intent = ui.on_key(&fake, key(KeyCode::Enter));
     assert_eq!(intent, BrowserIntent::SearchCommitted("tag:leech".into()));
@@ -517,7 +563,11 @@ fn selection_toggle_range_all_and_invert() {
     draw(&mut ui, &fake, 100, 16);
     press(&mut ui, &fake, &[ch(' '), ch(' ')]);
     assert_eq!(ui.targets(), [1, 2]);
-    press(&mut ui, &fake, &[ch('v'), ch('j'), ch('j'), key(KeyCode::Esc)]);
+    press(
+        &mut ui,
+        &fake,
+        &[ch('v'), ch('j'), ch('j'), key(KeyCode::Esc)],
+    );
     assert_eq!(ui.targets(), [1, 2, 3, 4, 5]);
     press(&mut ui, &fake, &[ch('*')]);
     assert_eq!(ui.targets(), [6, 7, 8, 9, 10]);
@@ -539,12 +589,12 @@ fn card_actions_use_phase_one_commands_with_toggles() {
     // Row 2 has the red flag: pressing 1 there clears it.
     press(&mut ui, &fake, &[ch('j'), ch('1')]);
     assert!(matches!(
-        fake.log.borrow().last(),
+        fake.last().as_ref(),
         Some(Command::SetFlag { card_ids, flag: 0 }) if card_ids == &[2]
     ));
     press(&mut ui, &fake, &[ch('3')]);
     assert!(matches!(
-        fake.log.borrow().last(),
+        fake.last().as_ref(),
         Some(Command::SetFlag { flag: 3, .. })
     ));
     assert_eq!(ui.message(), Some("Flag 3 set on 1 card"));
@@ -554,21 +604,28 @@ fn card_actions_use_phase_one_commands_with_toggles() {
         fake.last_browse(),
         Some(BrowseCommand::Restore { card_ids }) if card_ids == [4]
     ));
-    press(&mut ui, &fake, &[ch('g'), ch(' '), ch(' '), ch('k'), ch('k'), ch('s')]);
+    press(
+        &mut ui,
+        &fake,
+        &[ch('g'), ch(' '), ch(' '), ch('k'), ch('k'), ch('s')],
+    );
     assert!(matches!(
-        fake.log.borrow().last(),
+        fake.last().as_ref(),
         Some(Command::BuryOrSuspend { target: Target::Cards(ids), mode: BuryMode::Suspend }) if ids == &[1, 2]
     ));
     assert_eq!(ui.message(), Some("Suspended 2 cards"));
     press(&mut ui, &fake, &[ch('b')]);
     assert!(matches!(
-        fake.log.borrow().last(),
-        Some(Command::BuryOrSuspend { mode: BuryMode::Bury, .. })
+        fake.last().as_ref(),
+        Some(Command::BuryOrSuspend {
+            mode: BuryMode::Bury,
+            ..
+        })
     ));
     // Mark: note of card 1 is unmarked -> marked, by note id.
     press(&mut ui, &fake, &[ch('m')]);
     assert!(matches!(
-        fake.log.borrow().last(),
+        fake.last().as_ref(),
         Some(Command::SetMarked { note_ids, marked: true }) if note_ids == &[1001]
     ));
     // Undo reports Anki's label.
@@ -599,14 +656,19 @@ fn prompts_for_deck_tags_due_reposition_forget_and_grade() {
     type_text(&mut ui, &fake, "new one");
     ui.on_key(&fake, key(KeyCode::Enter));
     assert!(matches!(
-        fake.log.borrow().last(),
+        fake.logged(|c| matches!(c, Command::Notes(_))).last(),
         Some(Command::Notes(NoteCommand::AddTags { note_ids, tags })) if note_ids == &[1001] && tags == "new one"
+    ));
+    // Tag changes reload the sidebar (and its completion names).
+    assert!(matches!(
+        fake.last(),
+        Some(Command::Browse(BrowseCommand::Sidebar))
     ));
     press(&mut ui, &fake, &[ch('T')]);
     type_text(&mut ui, &fake, "leech");
     ui.on_key(&fake, key(KeyCode::Enter));
     assert!(matches!(
-        fake.log.borrow().last(),
+        fake.logged(|c| matches!(c, Command::Notes(_))).last(),
         Some(Command::Notes(NoteCommand::RemoveTags { tags, .. })) if tags == "leech"
     ));
     press(&mut ui, &fake, &[ch('U')]);
@@ -625,7 +687,11 @@ fn prompts_for_deck_tags_due_reposition_forget_and_grade() {
     // Reposition: defaults from Anki, edited start.
     press(&mut ui, &fake, &[ch('r')]);
     let (text, _) = draw(&mut ui, &fake, 100, 16);
-    let dialog: Vec<_> = text[5..11].iter().map(|l| l.trim()).collect();
+    // The 52-column box centred in 100 columns.
+    let dialog: Vec<String> = text[5..11]
+        .iter()
+        .map(|l| l.chars().skip(24).take(52).collect())
+        .collect();
     assert_eq!(
         dialog,
         [
@@ -642,19 +708,36 @@ fn prompts_for_deck_tags_due_reposition_forget_and_grade() {
     ui.on_key(&fake, key(KeyCode::Enter));
     assert!(matches!(
         fake.last_browse(),
-        Some(BrowseCommand::Reposition { start: 10, step: 1, randomize: false, shift: true, .. })
+        Some(BrowseCommand::Reposition {
+            start: 10,
+            step: 1,
+            randomize: false,
+            shift: true,
+            ..
+        })
     ));
     // Forget with the browser's defaults, one box toggled.
-    press(&mut ui, &fake, &[ch('f'), key(KeyCode::Down), ch(' '), key(KeyCode::Enter)]);
+    press(
+        &mut ui,
+        &fake,
+        &[ch('f'), key(KeyCode::Down), ch(' '), key(KeyCode::Enter)],
+    );
     assert!(matches!(
         fake.last_browse(),
-        Some(BrowseCommand::Forget { restore_position: true, reset_counts: true, .. })
+        Some(BrowseCommand::Forget {
+            restore_position: true,
+            reset_counts: true,
+            ..
+        })
     ));
     // Grade now by digit.
     press(&mut ui, &fake, &[ch('n'), ch('4')]);
     assert!(matches!(
         fake.last_browse(),
-        Some(BrowseCommand::GradeNow { rating: Rating::Easy, .. })
+        Some(BrowseCommand::GradeNow {
+            rating: Rating::Easy,
+            ..
+        })
     ));
 }
 
@@ -668,10 +751,21 @@ fn find_and_replace_always_passes_explicit_note_ids() {
     ui.on_key(&fake, key(KeyCode::Down));
     type_text(&mut ui, &fake, "dog");
     // Scope: All fields -> Tags -> Back.
-    press(&mut ui, &fake, &[key(KeyCode::Down), key(KeyCode::Right), key(KeyCode::Right)]);
-    press(&mut ui, &fake, &[key(KeyCode::Down), ch(' '), key(KeyCode::Down), ch(' ')]);
+    press(
+        &mut ui,
+        &fake,
+        &[key(KeyCode::Down), key(KeyCode::Right), key(KeyCode::Right)],
+    );
+    press(
+        &mut ui,
+        &fake,
+        &[key(KeyCode::Down), ch(' '), key(KeyCode::Down), ch(' ')],
+    );
     let (text, _) = draw(&mut ui, &fake, 100, 16);
-    assert!(text.iter().any(|l| l.contains("In:      ‹ Back ›")), "{text:?}");
+    assert!(
+        text.iter().any(|l| l.contains("In:      ‹ Back ›")),
+        "{text:?}"
+    );
     assert!(text.iter().any(|l| l.contains("In 2 selected note(s)")));
     ui.on_key(&fake, key(KeyCode::Enter));
     let Some(BrowseCommand::FindReplace(f)) = fake.last_browse() else {
@@ -698,12 +792,16 @@ fn delete_asks_first_and_refreshes_the_search() {
     draw(&mut ui, &fake, 100, 16);
     press(&mut ui, &fake, &[ch('D')]);
     let (text, _) = draw(&mut ui, &fake, 100, 16);
-    assert!(text.iter().any(|l| l.contains("Delete 1 note and all their cards?")));
+    assert!(text
+        .iter()
+        .any(|l| l.contains("Delete 1 note and all their cards?")));
     press(&mut ui, &fake, &[ch('n')]);
-    assert!(fake.logged(|c| matches!(c, Command::DeleteNotes { .. })).is_empty());
+    assert!(fake
+        .logged(|c| matches!(c, Command::DeleteNotes { .. }))
+        .is_empty());
     press(&mut ui, &fake, &[ch('D'), ch('y')]);
     assert!(matches!(
-        fake.log.borrow().last(),
+        fake.last().as_ref(),
         Some(Command::Browse(BrowseCommand::Search { .. }))
     ));
     assert_eq!(ui.ids(), [3, 4, 5, 6]);
@@ -725,11 +823,11 @@ fn mode_toggle_converts_selection_and_saves_the_setting() {
     let (text, _) = draw(&mut ui, &fake, 100, 16);
     assert!(text[0].ends_with("[Notes]"));
     assert!(text[1].contains("Note") && text[1].contains("Cards") && text[1].contains("Tags"));
-    assert_eq!(text[14], "3 notes shown, 1 selected");
+    assert!(text[14].starts_with("3 notes shown, 1 selected │ Showing notes"));
     // Note actions in notes mode go straight through; card actions expand.
     press(&mut ui, &fake, &[ch('s')]);
     assert!(matches!(
-        fake.log.borrow().last(),
+        fake.last().as_ref(),
         Some(Command::Browse(BrowseCommand::Restore { card_ids })) if card_ids == &[3, 4]
     ));
     assert_eq!(
@@ -748,7 +846,10 @@ fn sorting_by_column_and_reversing_in_memory() {
     draw(&mut ui, &fake, 100, 16);
     press(&mut ui, &fake, &[ch('S')]);
     let (text, _) = draw(&mut ui, &fake, 100, 16);
-    assert!(text.iter().any(|l| l.contains("1 Sort Field ▲")), "{text:?}");
+    assert!(
+        text.iter().any(|l| l.contains("1 Sort Field ▲")),
+        "{text:?}"
+    );
     // Due defaults to descending.
     press(&mut ui, &fake, &[ch('3')]);
     assert_eq!(fake.settings.borrow().card_sort, "cardDue");
@@ -759,12 +860,15 @@ fn sorting_by_column_and_reversing_in_memory() {
     ));
     assert_eq!(ui.ids(), [5, 4, 3, 2, 1]);
     // Same column again: reversed without a new search.
-    let searches = fake.logged(|c| matches!(c, Command::Browse(BrowseCommand::Search { .. }))).len();
+    let searches = fake
+        .logged(|c| matches!(c, Command::Browse(BrowseCommand::Search { .. })))
+        .len();
     press(&mut ui, &fake, &[ch('S'), ch('3')]);
     assert_eq!(ui.ids(), [1, 2, 3, 4, 5]);
     assert!(!fake.settings.borrow().card_sort_reverse);
     assert_eq!(
-        fake.logged(|c| matches!(c, Command::Browse(BrowseCommand::Search { .. }))).len(),
+        fake.logged(|c| matches!(c, Command::Browse(BrowseCommand::Search { .. })))
+            .len(),
         searches
     );
     let (text, _) = draw(&mut ui, &fake, 100, 16);
@@ -774,7 +878,10 @@ fn sorting_by_column_and_reversing_in_memory() {
     settings.card_columns.push("question".into());
     ui.settings = settings;
     press(&mut ui, &fake, &[ch('S'), ch('5')]);
-    assert_eq!(ui.message(), Some("Sorting on this column is not supported"));
+    assert_eq!(
+        ui.message(),
+        Some("Sorting on this column is not supported")
+    );
 }
 
 #[test]
@@ -787,7 +894,11 @@ fn column_chooser_adds_and_removes_columns() {
     assert!(text.iter().any(|l| l.contains("[x] Card")));
     assert!(text.iter().any(|l| l.contains("[ ] Question")));
     // Items sorted by label: Card, Deck, Due, Note, Question, Sort Field, Tags.
-    press(&mut ui, &fake, &[ch('j'), ch('j'), ch('j'), ch('j'), ch(' ')]);
+    press(
+        &mut ui,
+        &fake,
+        &[ch('j'), ch('j'), ch('j'), ch('j'), ch(' ')],
+    );
     assert_eq!(
         fake.settings.borrow().card_columns,
         ["noteFld", "template", "cardDue", "deck", "question"]
@@ -801,7 +912,10 @@ fn column_chooser_adds_and_removes_columns() {
     assert!(!ui.has_dialog());
     let (text, _) = draw(&mut ui, &fake, 100, 16);
     assert!(text[1].contains("Question"));
-    assert!(text[2].contains("question"), "rows refetched with the new columns");
+    assert!(
+        text[2].contains("question"),
+        "rows refetched with the new columns"
+    );
 }
 
 #[test]
@@ -812,7 +926,10 @@ fn sidebar_searches_with_modifiers_and_persists_collapse() {
     ui.on_key(&fake, key(KeyCode::Tab));
     assert_eq!(ui.focus(), Focus::Sidebar);
     let index = |ui: &BrowserUi, label: &str| {
-        ui.sidebar_rows.iter().position(|r| r.label == label).unwrap()
+        ui.sidebar_rows
+            .iter()
+            .position(|r| r.label == label)
+            .unwrap()
     };
     ui.sidebar_cursor = index(&ui, "French");
     assert_eq!(
@@ -827,8 +944,13 @@ fn sidebar_searches_with_modifiers_and_persists_collapse() {
     ui.on_key(&fake, ch('n'));
     ui.on_key(&fake, ch('o'));
     assert!(matches!(
-        fake.last_browse(),
-        Some(BrowseCommand::JoinSearch { joiner: SearchJoiner::Or, negate: true, .. })
+        fake.logged(|c| matches!(c, Command::Browse(BrowseCommand::JoinSearch { .. })))
+            .last(),
+        Some(Command::Browse(BrowseCommand::JoinSearch {
+            joiner: SearchJoiner::Or,
+            negate: true,
+            ..
+        }))
     ));
     assert_eq!(ui.query(), "deck:Lang::French tag:leech OR -flag:1");
     ui.sidebar_cursor = index(&ui, "Default");
@@ -837,15 +959,18 @@ fn sidebar_searches_with_modifiers_and_persists_collapse() {
     ui.on_key(&fake, ch('n'));
     ui.on_key(&fake, key(KeyCode::Enter));
     assert!(matches!(
-        fake.last_browse(),
-        Some(BrowseCommand::NormalizeSearch { query }) if query == "-(deck:Default)"
+        fake.logged(|c| matches!(c, Command::Browse(BrowseCommand::NormalizeSearch { .. }))).last(),
+        Some(Command::Browse(BrowseCommand::NormalizeSearch { query })) if query == "-(deck:Default)"
     ));
     // Folding a deck is stored in the collection (browser scope).
     ui.sidebar_cursor = index(&ui, "Lang");
     ui.on_key(&fake, ch(' '));
     assert!(matches!(
         fake.last_browse(),
-        Some(BrowseCommand::SetDeckCollapsed { deck_id: 5, collapsed: true })
+        Some(BrowseCommand::SetDeckCollapsed {
+            deck_id: 5,
+            collapsed: true
+        })
     ));
     assert!(!ui.sidebar_rows.iter().any(|r| r.label == "French"));
     // Sections fold locally.
@@ -893,25 +1018,31 @@ fn saved_searches_are_saved_and_deleted() {
 fn preview_pane_renders_the_current_card() {
     let fake = Fake::new(3);
     let mut ui = open(&fake);
-    draw(&mut ui, &fake, 120, 12);
+    draw(&mut ui, &fake, 120, 20);
     press(&mut ui, &fake, &[ch('j'), ch('p')]);
-    let (text, _) = draw(&mut ui, &fake, 120, 12);
-    assert!(text[1].contains("┌ Preview: question"), "{text:?}");
-    assert!(text[2].contains("│Question 2"), "{text:?}");
-    assert!(!text[2].contains("[[type"), "type-answer placeholder removed");
+    let (text, _) = draw(&mut ui, &fake, 120, 20);
+    assert!(
+        text.iter().any(|l| l.contains("┌ Preview: question")),
+        "{text:?}"
+    );
+    let line = text
+        .iter()
+        .find(|l| l.contains("│Question 2"))
+        .expect("question");
+    assert!(!line.contains("[[type"), "type-answer placeholder removed");
     assert!(matches!(
         fake.logged(|c| matches!(c, Command::Render { .. })).last(),
         Some(Command::Render { card_id: 2 })
     ));
     ui.on_key(&fake, ch('P'));
-    let (text, _) = draw(&mut ui, &fake, 120, 12);
-    assert!(text[1].contains("Preview: answer"));
+    let (text, _) = draw(&mut ui, &fake, 120, 20);
+    assert!(text.iter().any(|l| l.contains("Preview: answer")));
     assert!(text.iter().any(|l| l.contains("Answer 2")), "{text:?}");
     // Moving the cursor renders the new card once.
     let renders = fake.logged(|c| matches!(c, Command::Render { .. })).len();
     press(&mut ui, &fake, &[ch('j')]);
-    draw(&mut ui, &fake, 120, 12);
-    draw(&mut ui, &fake, 120, 12);
+    draw(&mut ui, &fake, 120, 20);
+    draw(&mut ui, &fake, 120, 20);
     assert_eq!(
         fake.logged(|c| matches!(c, Command::Render { .. })).len(),
         renders + 1
@@ -931,7 +1062,9 @@ fn helpers_fit_text_and_share_widths() {
     assert_eq!(fit("abcdefg", 5, Elide::Middle, false), "ab…fg");
     assert_eq!(fit("ab", 4, Elide::Right, true), " ab ");
     assert_eq!(fit("日本語", 4, Elide::Right, false), "日… ");
-    let keys: Vec<String> = ["noteFld", "cardDue", "question"].map(String::from).to_vec();
+    let keys: Vec<String> = ["noteFld", "cardDue", "question"]
+        .map(String::from)
+        .to_vec();
     assert_eq!(column_widths(&keys, 52), [20, 10, 20]);
     assert_eq!(strip_type_answer("a [[type:Back]] b"), "a  b");
 }

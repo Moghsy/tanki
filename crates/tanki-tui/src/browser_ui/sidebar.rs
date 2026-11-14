@@ -222,7 +222,11 @@ pub fn rows(data: &SidebarData, local: &LocalState) -> Vec<Row> {
                     b.leaf(2, t.name.clone(), format!("({note} card:{})", t.ord + 1));
                 }
                 for f in &nt.fields {
-                    b.leaf(2, f.name.clone(), format!("({note} {})", field_term(&f.name)));
+                    b.leaf(
+                        2,
+                        f.name.clone(),
+                        format!("({note} {})", field_term(&f.name)),
+                    );
                 }
             }
         }
@@ -333,7 +337,10 @@ mod tests {
             "\"deck:Lang::Old words\""
         );
         assert_eq!(find(&all, "a_b").unwrap().search.unwrap(), "tag:a\\_b");
-        assert_eq!(find(&all, "Overdue").unwrap().search.unwrap(), "(is:due -prop:due=0)");
+        assert_eq!(
+            find(&all, "Overdue").unwrap().search.unwrap(),
+            "(is:due -prop:due=0)"
+        );
         assert_eq!(find(&all, "Flags").unwrap().search.unwrap(), "-flag:0");
         assert!(find(&all, "Card 1").is_none());
         let sections: Vec<_> = all
@@ -343,7 +350,15 @@ mod tests {
             .collect();
         assert_eq!(
             sections,
-            ["Saved Searches", "Today", "Flags", "Card State", "Decks", "Note Types", "Tags"]
+            [
+                "Saved Searches",
+                "Today",
+                "Flags",
+                "Card State",
+                "Decks",
+                "Note Types",
+                "Tags"
+            ]
         );
         local.expanded_notetypes.insert(9);
         local.collapsed_sections.insert(Section::Today);

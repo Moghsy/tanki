@@ -232,20 +232,30 @@ fn fit(text: &str, width: usize, elide: Elide, centered: bool) -> String {
             Elide::None => take(&mut text.chars(), width),
             Elide::Right => format!("{}…", take(&mut text.chars(), width - 1)),
             Elide::Left => {
-                let tail: String = take(&mut text.chars().rev(), width - 1).chars().rev().collect();
+                let tail: String = take(&mut text.chars().rev(), width - 1)
+                    .chars()
+                    .rev()
+                    .collect();
                 format!("…{tail}")
             }
             Elide::Middle => {
                 let head = (width - 1).div_ceil(2);
                 let tail_len = width - 1 - head;
-                let tail: String = take(&mut text.chars().rev(), tail_len).chars().rev().collect();
+                let tail: String = take(&mut text.chars().rev(), tail_len)
+                    .chars()
+                    .rev()
+                    .collect();
                 format!("{}…{tail}", take(&mut text.chars(), head))
             }
         }
     };
     let pad = width.saturating_sub(fitted.width());
     if centered {
-        format!("{}{fitted}{}", " ".repeat(pad / 2), " ".repeat(pad - pad / 2))
+        format!(
+            "{}{fitted}{}",
+            " ".repeat(pad / 2),
+            " ".repeat(pad - pad / 2)
+        )
     } else {
         format!("{fitted}{}", " ".repeat(pad))
     }
@@ -257,9 +267,7 @@ fn column_width(key: &str) -> Option<usize> {
         "noteFld" | "question" | "answer" => return None,
         "cardDue" | "cardMod" | "noteMod" | "noteCrt" => 10,
         "cardIvl" => 10,
-        "cardEase" | "cardLapses" | "cardReps" | "stability" | "difficulty" | "retrievability" => {
-            7
-        }
+        "cardEase" | "cardLapses" | "cardReps" | "stability" | "difficulty" | "retrievability" => 7,
         "originalPosition" => 8,
         "template" => 12,
         "note" => 14,
@@ -274,11 +282,8 @@ fn column_widths(keys: &[String], total: usize) -> Vec<usize> {
     let fixed: usize = keys.iter().filter_map(|k| column_width(k)).sum();
     let flex = keys.iter().filter(|k| column_width(k).is_none()).count();
     let free = total.saturating_sub(fixed + gaps);
-    let (each, mut extra) = if flex > 0 {
-        (free / flex, free % flex)
-    } else {
-        (0, 0)
-    };
+    let each = free.checked_div(flex).unwrap_or(0);
+    let mut extra = free.checked_rem(flex).unwrap_or(0);
     keys.iter()
         .map(|k| match column_width(k) {
             Some(w) => w,
@@ -511,7 +516,12 @@ impl BrowserUi {
 
     /// Runs `query` (already normalised); the cursor goes to `keep` when it
     /// is in the result, else to the first row.
-    fn run_search(&mut self, backend: &dyn Backend, query: String, keep: Option<i64>) -> Result<()> {
+    fn run_search(
+        &mut self,
+        backend: &dyn Backend,
+        query: String,
+        keep: Option<i64>,
+    ) -> Result<()> {
         let ids = browse_ids(
             backend,
             BrowseCommand::Search {
@@ -744,7 +754,12 @@ impl BrowserUi {
         }
     }
 
-    fn apply_search(&mut self, backend: &dyn Backend, query: String, focus: Focus) -> BrowserIntent {
+    fn apply_search(
+        &mut self,
+        backend: &dyn Backend,
+        query: String,
+        focus: Focus,
+    ) -> BrowserIntent {
         self.search = TextInput::new(query.clone());
         self.completion.close();
         match self.run_search(backend, query.clone(), None) {
@@ -884,7 +899,7 @@ impl BrowserUi {
                 let result = edit(backend, Command::Notes(NoteCommand::ClearUnusedTags));
                 let message = match &result {
                     Ok(EditResponse::Count { count, .. }) => {
-                        format!("Removed {} unused", plural(*count, "tag"))
+                        format!("Removed {}", plural(*count, "unused tag"))
                     }
                     _ => String::new(),
                 };
@@ -908,7 +923,9 @@ impl BrowserUi {
         match self.settings.mode {
             BrowseMode::Cards => Ok(targets),
             BrowseMode::Notes if targets.is_empty() => Ok(targets),
-            BrowseMode::Notes => browse_ids(backend, BrowseCommand::CardsOfNotes { note_ids: targets }),
+            BrowseMode::Notes => {
+                browse_ids(backend, BrowseCommand::CardsOfNotes { note_ids: targets })
+            }
         }
     }
     fn note_ids(&self, backend: &dyn Backend) -> Result<Vec<i64>> {
@@ -916,7 +933,9 @@ impl BrowserUi {
         match self.settings.mode {
             BrowseMode::Notes => Ok(targets),
             BrowseMode::Cards if targets.is_empty() => Ok(targets),
-            BrowseMode::Cards => browse_ids(backend, BrowseCommand::NotesOfCards { card_ids: targets }),
+            BrowseMode::Cards => {
+                browse_ids(backend, BrowseCommand::NotesOfCards { card_ids: targets })
+            }
         }
     }
     fn current_card(&self, backend: &dyn Backend) -> Result<Option<i64>> {
@@ -925,9 +944,14 @@ impl BrowserUi {
         };
         Ok(match self.settings.mode {
             BrowseMode::Cards => Some(item),
-            BrowseMode::Notes => browse_ids(backend, BrowseCommand::CardsOfNotes { note_ids: vec![item] })?
-                .first()
-                .copied(),
+            BrowseMode::Notes => browse_ids(
+                backend,
+                BrowseCommand::CardsOfNotes {
+                    note_ids: vec![item],
+                },
+            )?
+            .first()
+            .copied(),
         })
     }
     /// `cid:N` / `nid:N` for the current row.
@@ -1005,12 +1029,12 @@ impl BrowserUi {
             .current()
             .and_then(|id| self.rows.get(&id))
             .map(|r| r.color);
-        let flag = if self.settings.mode == BrowseMode::Cards && current == Some(RowColor::Flag(flag))
-        {
-            0
-        } else {
-            flag
-        };
+        let flag =
+            if self.settings.mode == BrowseMode::Cards && current == Some(RowColor::Flag(flag)) {
+                0
+            } else {
+                flag
+            };
         let n = card_ids.len();
         let result = Self::changes(backend, Command::SetFlag { card_ids, flag });
         let message = if flag == 0 {
@@ -1102,7 +1126,9 @@ impl BrowserUi {
             )
         };
         let result = (|| -> Result<()> {
-            let keep = convert(self.current().into_iter().collect())?.first().copied();
+            let keep = convert(self.current().into_iter().collect())?
+                .first()
+                .copied();
             let selected = convert(self.targets_if_selected())?;
             let mut settings = self.settings.clone();
             settings.mode = if to_notes {
@@ -1146,7 +1172,13 @@ impl BrowserUi {
         let mut items: Vec<(String, String, bool)> = self
             .columns
             .iter()
-            .map(|c| (c.key.clone(), self.label(c).to_owned(), active.contains(&c.key)))
+            .map(|c| {
+                (
+                    c.key.clone(),
+                    self.label(c).to_owned(),
+                    active.contains(&c.key),
+                )
+            })
             .collect();
         items.sort_by(|a, b| a.1.cmp(&b.1));
         self.dialog = Some(Dialog::Columns(Columns { items, cursor: 0 }));
@@ -1477,9 +1509,19 @@ impl BrowserUi {
                     PromptKind::SetDue => {
                         if let Some(card_ids) = self.with_cards(backend) {
                             let n = card_ids.len();
-                            let result = browse(backend, BrowseCommand::SetDueDate { card_ids, days: text })
-                                .map(EditOrChanges::from);
-                            self.done(backend, result, format!("Rescheduled {}", plural(n, "card")));
+                            let result = browse(
+                                backend,
+                                BrowseCommand::SetDueDate {
+                                    card_ids,
+                                    days: text,
+                                },
+                            )
+                            .map(EditOrChanges::from);
+                            self.done(
+                                backend,
+                                result,
+                                format!("Rescheduled {}", plural(n, "card")),
+                            );
                         }
                     }
                 }
@@ -1510,7 +1552,11 @@ impl BrowserUi {
                         },
                     )
                     .map(EditOrChanges::from);
-                    self.done(backend, result, format!("Reset {} to new", plural(n, "card")));
+                    self.done(
+                        backend,
+                        result,
+                        format!("Reset {} to new", plural(n, "card")),
+                    );
                 }
             }
             Dialog::Reposition(r) => {
@@ -1681,7 +1727,9 @@ impl BrowserUi {
                 return BrowserIntent::None;
             }
             KeyCode::Enter => return self.sidebar_search(backend, row, None),
-            KeyCode::Char('a') => return self.sidebar_search(backend, row, Some(SearchJoiner::And)),
+            KeyCode::Char('a') => {
+                return self.sidebar_search(backend, row, Some(SearchJoiner::And))
+            }
             KeyCode::Char('o') => return self.sidebar_search(backend, row, Some(SearchJoiner::Or)),
             KeyCode::Char('r') => return self.sidebar_replace(backend, row),
             KeyCode::Char('w') => self.open_save_search(),
@@ -1772,7 +1820,11 @@ impl BrowserUi {
             None => browse_text(
                 backend,
                 BrowseCommand::NormalizeSearch {
-                    query: if negate { format!("-({search})") } else { search },
+                    query: if negate {
+                        format!("-({search})")
+                    } else {
+                        search
+                    },
                 },
             ),
             Some(joiner) => browse_text(
@@ -1795,7 +1847,11 @@ impl BrowserUi {
     }
 
     /// `r`: replace terms of the same kind (desktop's Ctrl+Shift click).
-    fn sidebar_replace(&mut self, backend: &dyn Backend, row: Option<sidebar::Row>) -> BrowserIntent {
+    fn sidebar_replace(
+        &mut self,
+        backend: &dyn Backend,
+        row: Option<sidebar::Row>,
+    ) -> BrowserIntent {
         let Some(search) = self.item_search(row) else {
             return BrowserIntent::None;
         };
@@ -1804,7 +1860,11 @@ impl BrowserUi {
             backend,
             BrowseCommand::ReplaceSearch {
                 existing: self.query.clone(),
-                replacement: if negate { format!("-({search})") } else { search },
+                replacement: if negate {
+                    format!("-({search})")
+                } else {
+                    search
+                },
             },
         ) {
             Ok(query) => self.apply_search(backend, query, Focus::Sidebar),
@@ -1943,7 +2003,12 @@ impl BrowserUi {
         }
         if self.focus == Focus::Search && self.dialog.is_none() {
             let label = "Search: ".width() as u16;
-            let anchor = Rect::new(areas.search.x + label, areas.search.y, areas.search.width, 1);
+            let anchor = Rect::new(
+                areas.search.x + label,
+                areas.search.y,
+                areas.search.width,
+                1,
+            );
             self.completion.render(&self.search, anchor, area, buf);
         }
     }
@@ -1984,7 +2049,13 @@ impl BrowserUi {
         } else if self.sidebar_cursor >= scroll + height {
             scroll = self.sidebar_cursor + 1 - height;
         }
-        for (i, row) in self.sidebar_rows.iter().enumerate().skip(scroll).take(height) {
+        for (i, row) in self
+            .sidebar_rows
+            .iter()
+            .enumerate()
+            .skip(scroll)
+            .take(height)
+        {
             let marker = if !row.expandable {
                 "  "
             } else if row.collapsed {
@@ -2072,7 +2143,12 @@ impl BrowserUi {
                 }
                 Some(BrowserRow { error: Some(e), .. }) => {
                     let w = (area.width as usize).saturating_sub(gutter);
-                    buf.set_string(x, y, fit(e, w, Elide::Right, false), style.add_modifier(Modifier::DIM));
+                    buf.set_string(
+                        x,
+                        y,
+                        fit(e, w, Elide::Right, false),
+                        style.add_modifier(Modifier::DIM),
+                    );
                 }
                 Some(row) => {
                     for (i, &w) in widths.iter().enumerate() {
@@ -2080,10 +2156,12 @@ impl BrowserUi {
                             break;
                         }
                         let cell = row.cells.get(i);
-                        let centered = keys.get(i).and_then(|k| self.column(k)).is_some_and(|c| c.centered);
-                        let text = cell.map_or(String::new(), |c| {
-                            fit(&c.text, w, c.elide, centered)
-                        });
+                        let centered = keys
+                            .get(i)
+                            .and_then(|k| self.column(k))
+                            .is_some_and(|c| c.centered);
+                        let text =
+                            cell.map_or(String::new(), |c| fit(&c.text, w, c.elide, centered));
                         let text = if w < (area.right() - x) as usize {
                             format!("{text} ")
                         } else {
@@ -2103,7 +2181,11 @@ impl BrowserUi {
     }
 
     fn render_preview(&self, area: Rect, buf: &mut Buffer, renderer: &dyn CardRenderer) {
-        let side = if self.preview_answer { "answer" } else { "question" };
+        let side = if self.preview_answer {
+            "answer"
+        } else {
+            "question"
+        };
         let block = Block::default()
             .borders(Borders::ALL)
             .title(format!(" Preview: {side} "));
@@ -2157,10 +2239,7 @@ impl BrowserUi {
 
     fn render_status(&self, area: Rect, buf: &mut Buffer) {
         let word = self.item_word();
-        let mut text = format!(
-            "{} shown",
-            plural(self.ids.len(), word)
-        );
+        let mut text = format!("{} shown", plural(self.ids.len(), word));
         if !self.selected.is_empty() {
             text.push_str(&format!(", {} selected", self.selected.len()));
         }
