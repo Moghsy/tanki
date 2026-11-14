@@ -5170,6 +5170,8 @@ dependencies = [
  "anki_i18n",
  "anki_proto",
  "axum",
+ "chrono",
+ "libc",
  "prost",
  "reqwest",
  "rusqlite",

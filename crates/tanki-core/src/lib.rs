@@ -1,11 +1,13 @@
 //! Collection actor, study commands and adapters to the pinned Anki core.
 
 mod actor;
+mod backup;
 pub mod config;
 mod data;
 mod fixture;
 #[doc(hidden)]
 pub mod packages;
+mod replacement;
 mod safety;
 mod study;
 mod sync;

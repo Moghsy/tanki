@@ -26,6 +26,10 @@ struct Args {
     /// Print machine-readable output for commands such as decks.
     #[arg(long, global = true)]
     json: bool,
+    /// Open even though collection.anki2-wal exists, after making sure Anki is
+    /// closed (it is left behind by a crash). Other-process checks still apply.
+    #[arg(long, global = true)]
+    confirm_closed: bool,
     /// JSON array of {scope, key, action} overrides; null action unbinds a key.
     #[arg(long, global = true)]
     keymap: Option<PathBuf>,
@@ -87,9 +91,11 @@ fn profile_path(args: &Args) -> Result<PathBuf> {
 /// Always call close, even when the operation failed: close joins the exit backup.
 fn with_collection<T>(
     path: &Path,
+    confirmed_closed: bool,
     operation: impl FnOnce(&CollectionActor) -> Result<T>,
 ) -> Result<T> {
-    let actor = CollectionActor::open(path)?;
+    let actor =
+        CollectionActor::open_with_options(path, tanki_core::OpenOptions { confirmed_closed })?;
     let result = operation(&actor);
     let closed = actor.close();
     match (result, closed) {
@@ -157,7 +163,7 @@ fn run(args: Args) -> Result<()> {
             println!("{}", report.summary);
         }
         Some(CliCommand::FixtureDump) => {
-            with_collection(&profile_path(&args)?, |actor| {
+            with_collection(&profile_path(&args)?, args.confirm_closed, |actor| {
                 let Response::CardIds(ids) = actor.execute(Command::Search {
                     query: String::new(),
                 })?
@@ -177,7 +183,7 @@ fn run(args: Args) -> Result<()> {
             })?;
         }
         Some(CliCommand::Decks) => {
-            let output = with_collection(&profile_path(&args)?, |actor| {
+            let output = with_collection(&profile_path(&args)?, args.confirm_closed, |actor| {
                 let tree = backend::deck_tree(actor)?;
                 if args.json {
                     Ok(serde_json::to_string_pretty(&tree)?)
@@ -195,7 +201,7 @@ fn run(args: Args) -> Result<()> {
             }
             let keymap = load_keymap(args.keymap.as_deref())?;
             let path = profile_path(&args)?;
-            with_collection(&path, |actor| {
+            with_collection(&path, args.confirm_closed, |actor| {
                 if let Some(CliCommand::Review { deck: Some(name) }) = &args.command {
                     let tree = backend::deck_tree(actor)?;
                     let id = backend::find_deck(&tree, name)
@@ -220,16 +226,21 @@ fn run(args: Args) -> Result<()> {
     }
     Ok(())
 }
+/// PLAN 9 exit codes; see `docs/implementation/phase-2-interfaces.md`.
+fn exit_code(error: &(dyn std::error::Error + 'static)) -> u8 {
+    match error.downcast_ref::<CoreError>() {
+        Some(CoreError::Locked | CoreError::InUse(_)) => 20,
+        Some(CoreError::SchemaChangeRequired) => 24,
+        Some(CoreError::ProfileBusy(_)) => 25,
+        _ => 1,
+    }
+}
 fn main() -> std::process::ExitCode {
     match run(Args::parse()) {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("tanki: {e}");
-            if e.downcast_ref::<CoreError>() == Some(&CoreError::Locked) {
-                std::process::ExitCode::from(20)
-            } else {
-                std::process::ExitCode::FAILURE
-            }
+            std::process::ExitCode::from(exit_code(e.as_ref()))
         }
     }
 }
