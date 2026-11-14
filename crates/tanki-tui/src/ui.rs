@@ -1,5 +1,5 @@
 //! Drawing: every screen, overlay and the status line, into a ratatui frame.
-use crate::app::{graphics_name, App, ChoiceValue, Overlay, Screen};
+use crate::app::{graphics_name, App, ChoiceValue, Overlay, PromptKind, Screen};
 use crate::backend::DeckRow;
 use crate::keymap::{Action, Scope};
 use crate::reviewer::{next_learn_message, Phase};
@@ -87,6 +87,12 @@ impl App<'_> {
             }
         }
         self.draw_overlay(frame, main);
+        if self.sync_ui.is_visible() {
+            frame.render_widget(&self.sync_ui, main);
+        }
+        if let Some(ui) = &self.package_ui {
+            frame.render_widget(ui, main);
+        }
         self.draw_status(frame.buffer_mut(), status);
         self.services
             .renderer
@@ -143,7 +149,7 @@ impl App<'_> {
                 Line::from(Span::styled(studied.clone(), dim())).alignment(Alignment::Center);
             frame.render_widget(line, Rect::new(area.x, footer_y, area.width, 1));
         }
-        let hint = "Enter open · s study · Space collapse · : commands · ? help";
+        let hint = "Enter open · s study · y sync · Space collapse · : commands · ? help";
         let line = Line::from(Span::styled(hint, dim())).alignment(Alignment::Center);
         frame.render_widget(line, Rect::new(area.x, footer_y + 1, area.width, 1));
     }
@@ -754,8 +760,13 @@ impl App<'_> {
                     );
                 }
             }
-            Overlay::Prompt { title, input, .. } => {
-                let inner = self.popup(frame, area, 64, 6, "Set Due Date");
+            Overlay::Prompt { title, input, kind } => {
+                let (heading, height) = match kind {
+                    PromptKind::SetDueDate => ("Set Due Date", 6),
+                    PromptKind::ImportPath => ("Import", 7),
+                    PromptKind::ExportPath => ("Export", 7),
+                };
+                let inner = self.popup(frame, area, 64, height, heading);
                 let p = Paragraph::new(title.as_str()).wrap(Wrap { trim: true });
                 frame.render_widget(
                     p,

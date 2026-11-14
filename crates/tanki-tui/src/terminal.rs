@@ -30,6 +30,8 @@ pub struct Options {
     pub graphics: GraphicsMode,
     pub start: Start,
     pub keymap: Keymap,
+    /// tanki's config.toml; `None` means sync is unavailable.
+    pub config: Option<std::path::PathBuf>,
 }
 
 impl Default for Options {
@@ -38,6 +40,7 @@ impl Default for Options {
             graphics: GraphicsMode::Auto,
             start: Start::Decks,
             keymap: Keymap::default(),
+            config: None,
         }
     }
 }
@@ -82,6 +85,7 @@ pub fn run(actor: &CollectionActor, options: Options) -> io::Result<()> {
     };
     let mut app = App::new(actor, services, profile, options.start, Now::current());
     app.set_keymap(options.keymap);
+    app.set_config(options.config);
     let _session = Session::enter(&capabilities)?;
     let mut terminal = Terminal::new(HyperlinkBackend::new(io::stdout(), links))?;
     terminal.clear()?;
