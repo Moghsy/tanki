@@ -135,6 +135,11 @@ actions! {
     ToggleHints = "toggle-hints", "Show / hide hints";
     ToggleDetails = "toggle-details", "Show / hide details";
     FocusInput = "focus-input", "Focus the answer input";
+    Sync = "sync", "Sync with the sync server";
+    Import = "import", "Import a deck package (.apkg)";
+    Export = "export", "Export a package (.apkg deck, .colpkg collection)";
+    BackupNow = "backup-now", "Create a backup now";
+    RestoreBackup = "restore-backup", "Restore the collection from a backup...";
     NextImage = "next-image", "Next image";
     PrevImage = "previous-image", "Previous image";
 }
@@ -332,12 +337,28 @@ pub const DEFAULTS: &[(&str, &str, &str)] = &[
     ("decks", "s", "study-deck"),
     ("decks", "q", "quit"),
     ("decks", "r", "refresh"),
+    // Sync and packages (Phase 2). Shift+I / Shift+E are the fallbacks for
+    // terminals without the kitty keyboard protocol.
+    ("decks", "y", "sync"),
+    ("decks", "ctrl+shift+i", "import"),
+    ("decks", "shift+i", "import"),
+    ("decks", "ctrl+e", "export"),
+    ("decks", "shift+e", "export"),
+    ("decks", "shift+b", "backup-now"),
+    ("decks", "shift+r", "restore-backup"),
     // Overview (R4 §22.2).
     ("overview", "enter", "study-now"),
     ("overview", "space", "study-now"),
     ("overview", "s", "study-now"),
     ("overview", "u", "unbury"),
     ("overview", "q", "deck-list"),
+    ("overview", "y", "sync"),
+    ("overview", "ctrl+shift+i", "import"),
+    ("overview", "shift+i", "import"),
+    ("overview", "ctrl+e", "export"),
+    ("overview", "shift+e", "export"),
+    ("overview", "shift+b", "backup-now"),
+    ("overview", "shift+r", "restore-backup"),
     // Reviewer (R4 §22.3, reviewer.py `_shortcutKeys`).
     ("review", "space", "show-answer"),
     ("review", "enter", "show-answer"),

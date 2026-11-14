@@ -1,17 +1,18 @@
 //! Test doubles: an in-memory collection behind [`Backend`] and fake
 //! renderer/image/audio adapters. Nothing here calls the other crates' stubs.
-use crate::backend::{self, Backend, Result};
+use crate::backend::{self, Backend, DataOp, Result};
 use crate::reviewer::{AudioCue, Now};
 use crate::services::{AudioPlayer, AudioStatus, ImageDisplay, ImageState};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::rc::Rc;
 use std::time::Instant;
 use tanki_core::{
-    AnswerOutcome, Command, Congrats, CoreError, Deck, DeckOverview, ForgetDefaults, OpChanges,
-    Queue, QueueKind, QueuedCard, Rating, RenderedCard, Response, SchedTiming, SchedulerStatus,
-    StudyConfig, Target,
+    AnswerOutcome, Command, Congrats, CoreError, DataCommand, DataResponse, Deck, DeckOverview,
+    ForgetDefaults, OpChanges, OperationProgress, Queue, QueueKind, QueuedCard, Rating,
+    RenderedCard, Response, SchedTiming, SchedulerStatus, StudyConfig, Target,
 };
 use tanki_media::MediaTag;
 use tanki_render::ImageSource;
@@ -79,8 +80,38 @@ pub struct FakeState {
     pub extra_counts: (u32, u32, u32),
 }
 
+/// The fake's data operations (sync, packages, backups).
+pub struct FakeData {
+    /// Every data command started, in order.
+    pub started: Vec<DataCommand>,
+    /// Results handed to the next operations in order; `Done` when empty.
+    pub results: VecDeque<Result<DataResponse>>,
+    /// While true, polling reports the operation as still pending.
+    pub hold: Rc<Cell<bool>>,
+    pub progress: OperationProgress,
+    pub cancels: u32,
+}
+
+struct FakeOp {
+    hold: Rc<Cell<bool>>,
+    result: RefCell<Option<Result<DataResponse>>>,
+}
+
+impl DataOp for FakeOp {
+    fn poll(&self) -> Result<Option<DataResponse>> {
+        if self.hold.get() {
+            return Ok(None);
+        }
+        match self.result.borrow_mut().take() {
+            Some(result) => result.map(Some),
+            None => Ok(None),
+        }
+    }
+}
+
 pub struct FakeBackend {
     pub state: RefCell<FakeState>,
+    pub data: RefCell<FakeData>,
 }
 
 impl FakeBackend {
@@ -88,6 +119,13 @@ impl FakeBackend {
         let mut config = backend::fallback_study_config();
         config.autoplay = true;
         Self {
+            data: RefCell::new(FakeData {
+                started: Vec::new(),
+                results: VecDeque::new(),
+                hold: Rc::new(Cell::new(false)),
+                progress: OperationProgress::default(),
+                cancels: 0,
+            }),
             state: RefCell::new(FakeState {
                 cards,
                 config,
@@ -154,6 +192,21 @@ fn changed() -> OpChanges {
 }
 
 impl Backend for FakeBackend {
+    fn start_data(&self, command: DataCommand) -> Result<Box<dyn DataOp>> {
+        let mut data = self.data.borrow_mut();
+        data.started.push(command);
+        let result = data.results.pop_front().unwrap_or(Ok(DataResponse::Done));
+        Ok(Box::new(FakeOp {
+            hold: data.hold.clone(),
+            result: RefCell::new(Some(result)),
+        }))
+    }
+    fn data_progress(&self) -> OperationProgress {
+        self.data.borrow().progress.clone()
+    }
+    fn cancel_data(&self) {
+        self.data.borrow_mut().cancels += 1;
+    }
     fn execute(&self, command: Command) -> Result<Response> {
         let mut s = self.state.borrow_mut();
         s.log.push(command.clone());

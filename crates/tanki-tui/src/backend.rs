@@ -4,8 +4,9 @@ use std::cell::Cell;
 #[cfg(test)]
 use tanki_core::{AnswerAction, QuestionAction};
 use tanki_core::{
-    AnswerOutcome, CollectionActor, Command, Congrats, CoreError, Deck, DeckOverview, OpChanges,
-    Queue, Rating, RenderedCard, Response, SchedTiming, SchedulerStatus, StudyConfig,
+    AnswerOutcome, CollectionActor, Command, Congrats, CoreError, DataCommand, DataResponse, Deck,
+    DeckOverview, OpChanges, OperationProgress, Queue, Rating, RenderedCard, Response, SchedTiming,
+    SchedulerStatus, StudyConfig,
 };
 
 pub type Result<T> = tanki_core::Result<T>;
@@ -14,11 +15,46 @@ pub type Result<T> = tanki_core::Result<T>;
 /// touches a collection (PLAN 14 rule 13).
 pub trait Backend {
     fn execute(&self, command: Command) -> Result<Response>;
+
+    /// Queues a long data operation (sync, packages, backups) and returns at
+    /// once; poll the handle from the event loop. The UI never blocks on one.
+    fn start_data(&self, _command: DataCommand) -> Result<Box<dyn DataOp>> {
+        Err(CoreError::Other(
+            "This collection does not support data operations".into(),
+        ))
+    }
+    /// Progress of the running data operation.
+    fn data_progress(&self) -> OperationProgress {
+        OperationProgress::default()
+    }
+    /// Asks the running data operation to stop.
+    fn cancel_data(&self) {}
+}
+
+/// A queued data operation.
+pub trait DataOp {
+    /// `Ok(None)` while the actor is still working.
+    fn poll(&self) -> Result<Option<DataResponse>>;
+}
+
+impl DataOp for tanki_core::PendingOperation {
+    fn poll(&self) -> Result<Option<DataResponse>> {
+        self.try_recv()
+    }
 }
 
 impl Backend for CollectionActor {
     fn execute(&self, command: Command) -> Result<Response> {
         CollectionActor::execute(self, command)
+    }
+    fn start_data(&self, command: DataCommand) -> Result<Box<dyn DataOp>> {
+        Ok(Box::new(CollectionActor::start_data(self, command)?))
+    }
+    fn data_progress(&self) -> OperationProgress {
+        self.progress()
+    }
+    fn cancel_data(&self) {
+        self.cancel_operation();
     }
 }
 
@@ -58,6 +94,15 @@ impl Backend for Tracked<'_> {
             }
         }
         result
+    }
+    fn start_data(&self, command: DataCommand) -> Result<Box<dyn DataOp>> {
+        self.inner.start_data(command)
+    }
+    fn data_progress(&self) -> OperationProgress {
+        self.inner.data_progress()
+    }
+    fn cancel_data(&self) {
+        self.inner.cancel_data();
     }
 }
 

@@ -134,6 +134,17 @@ impl PackageUi {
         (ui, intent)
     }
 
+    /// Starts a whole-collection `.colpkg` export right away.
+    pub fn export_collection(path: PathBuf, media: bool, legacy: bool) -> (Self, Intent) {
+        let ui = Self::new(path.clone(), Operation::Export, Screen::Running);
+        let intent = Intent::Start(DataCommand::Package(PackageCommand::ExportCollection {
+            path,
+            media,
+            legacy,
+        }));
+        (ui, intent)
+    }
+
     /// True while an operation runs: the app should poll progress and the
     /// pending result, and route keys here.
     pub fn is_running(&self) -> bool {
@@ -299,6 +310,12 @@ impl PackageUi {
             Ok(DataResponse::Exported { notes }) => {
                 self.finish(format!(
                     "Exported {notes} notes to {}.",
+                    self.path.display()
+                ));
+            }
+            Ok(DataResponse::Done) if self.operation == Operation::Export => {
+                self.finish(format!(
+                    "Exported the whole collection to {}.",
                     self.path.display()
                 ));
             }

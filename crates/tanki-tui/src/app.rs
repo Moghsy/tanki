@@ -3,14 +3,16 @@
 use crate::backend::{self, Backend, DeckRow, Tracked};
 use crate::input::TextInput;
 use crate::keymap::{Action, Chord, Keymap, Scope};
+use crate::package_ui::PackageUi;
 use crate::reviewer::{self, Effect, Now, Phase, Reviewer, SCHEDULER_UPGRADE_MESSAGE};
 use crate::services::{self, AudioPlayer, CardRenderer, Display, ImageDisplay};
+use crate::sync_ui::SyncUi;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use tanki_core::{Congrats, Deck, DeckOverview, OpChanges, Rating, UnburyMode};
+use tanki_core::{BackupInfo, Congrats, Deck, DeckOverview, OpChanges, Rating, UnburyMode};
 use tanki_media::AudioEvent;
 use tanki_render::WidgetKind;
 
@@ -126,6 +128,8 @@ pub struct MenuItem {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PromptKind {
     SetDueDate,
+    ImportPath,
+    ExportPath,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,6 +143,8 @@ pub enum ChoiceValue {
     Unbury(UnburyMode),
     TimeboxContinue,
     TimeboxFinish,
+    /// A backup from the list offered by `restore-backup` (index).
+    Backup(usize),
     Cancel,
 }
 
@@ -208,6 +214,13 @@ pub struct App<'a> {
     ignore_keys_before: Option<Instant>,
     cleanup: String,
     full_redraw: bool,
+    /// Path of tanki's config.toml; `None` means sync is unavailable.
+    config_path: Option<PathBuf>,
+    pub(crate) sync_ui: SyncUi,
+    pub(crate) package_ui: Option<PackageUi>,
+    job: Option<data::Job>,
+    /// The list behind the open restore chooser.
+    backups: Vec<BackupInfo>,
 }
 
 impl<'a> App<'a> {
@@ -235,6 +248,11 @@ impl<'a> App<'a> {
             ignore_keys_before: None,
             cleanup: String::new(),
             full_redraw: false,
+            config_path: None,
+            sync_ui: SyncUi::default(),
+            package_ui: None,
+            job: None,
+            backups: Vec::new(),
         };
         app.next_day_at = backend::sched_timing(&app.backend)
             .ok()
@@ -256,6 +274,7 @@ impl<'a> App<'a> {
         self.keymap = keymap;
     }
     pub fn shutdown(&mut self) {
+        self.cancel_job();
         self.services.audio.stop();
         self.clear_images();
     }
@@ -535,6 +554,7 @@ impl<'a> App<'a> {
 
     fn on_tick(&mut self) {
         let now = self.now;
+        self.poll_job();
         if let Screen::Review(_) = self.screen {
             if self.overlay.is_none() {
                 let playing = self.services.audio.is_playing();
@@ -573,7 +593,7 @@ impl<'a> App<'a> {
         }
     }
 
-    fn refresh_screen(&mut self) {
+    pub(crate) fn refresh_screen(&mut self) {
         match &self.screen {
             Screen::Decks(_) => self.reload_decks(),
             Screen::Overview(_) => self.open_overview(None),
@@ -601,6 +621,9 @@ impl<'a> App<'a> {
     }
 
     fn on_paste(&mut self, text: &str) {
+        if self.sync_ui.is_visible() || self.package_ui.is_some() {
+            return;
+        }
         match &mut self.overlay {
             Some(Overlay::Palette { input, selected }) => {
                 input.insert_str(text);
@@ -620,7 +643,7 @@ impl<'a> App<'a> {
     }
 
     fn on_mouse(&mut self, mouse: MouseEvent) {
-        if self.overlay.is_some() {
+        if self.overlay.is_some() || self.sync_ui.is_visible() || self.package_ui.is_some() {
             return;
         }
         match mouse.kind {
@@ -708,8 +731,23 @@ impl<'a> App<'a> {
         let Some(chord) = Chord::from_event(&key) else {
             return;
         };
-        if self.keymap.lookup(&[Scope::Global], &chord) == Some(Action::Quit) {
+        // Ctrl+C cancels a running sync or package operation instead of quitting.
+        let cancels = chord.ctrl
+            && chord.code == KeyCode::Char('c')
+            && (self.sync_ui.is_running()
+                || self.package_ui.as_ref().is_some_and(PackageUi::is_running));
+        if self.keymap.lookup(&[Scope::Global], &chord) == Some(Action::Quit) && !cancels {
             self.quit = true;
+            return;
+        }
+        if self.sync_ui.is_visible() {
+            let intent = self.sync_ui.on_key(key);
+            self.run_sync_intent(intent);
+            return;
+        }
+        if let Some(ui) = &mut self.package_ui {
+            let intent = ui.on_key(&key);
+            self.run_package_intent(intent);
             return;
         }
         if self.overlay.is_some() {
@@ -783,6 +821,21 @@ impl<'a> App<'a> {
                 self.notice(format!("Graphics: {}", graphics_name(mode)));
             }
             Action::Undo | Action::Redo => self.undo(action == Action::Redo),
+            Action::Sync
+            | Action::Import
+            | Action::Export
+            | Action::BackupNow
+            | Action::RestoreBackup
+                if matches!(self.screen, Screen::Decks(_) | Screen::Overview(_)) =>
+            {
+                match action {
+                    Action::Sync => self.sync_action(),
+                    Action::Import => self.import_action(),
+                    Action::Export => self.export_action(),
+                    Action::BackupNow => self.backup_now_action(),
+                    _ => self.restore_backup_action(),
+                }
+            }
             _ => match self.screen.scope() {
                 Scope::Decks => self.decks_action(action),
                 Scope::Overview => self.overview_action(action),
@@ -1398,6 +1451,9 @@ impl<'a> App<'a> {
                                 self.with_reviewer(|r, b, now| r.set_due_date(b, text, now));
                             }
                         }
+                        PromptKind::ImportPath | PromptKind::ExportPath => {
+                            self.path_entered(kind, &text)
+                        }
                     }
                 }
                 _ => {
@@ -1535,6 +1591,7 @@ impl<'a> App<'a> {
                 }
                 self.go_decks();
             }
+            ChoiceValue::Backup(index) => self.restore_chosen(index),
             ChoiceValue::Cancel => {}
         }
     }
@@ -1551,5 +1608,9 @@ pub fn graphics_name(mode: tanki_term::GraphicsMode) -> &'static str {
     }
 }
 
+mod data;
+
+#[cfg(test)]
+mod data_tests;
 #[cfg(test)]
 mod tests;
