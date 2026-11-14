@@ -152,3 +152,110 @@ fn sql_error(e: rusqlite::Error) -> CoreError {
         CoreError::Other(e.to_string())
     }
 }
+
+/// Other processes with any of `paths` open, as `(pid, command name)`.
+///
+/// Linux only: reads `/proc/<pid>/fd` links of processes this user may
+/// inspect, which includes a desktop Anki run by the same user. Elsewhere it
+/// finds nothing, and callers that need it refuse instead (`replacement`).
+pub(crate) fn other_holders(paths: &[PathBuf]) -> Vec<(u32, String)> {
+    let mut found = Vec::new();
+    if !cfg!(target_os = "linux") {
+        return found;
+    }
+    let me = std::process::id();
+    let Ok(procs) = fs::read_dir("/proc") else {
+        return found;
+    };
+    for entry in procs.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|s| s.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if pid == me {
+            continue;
+        }
+        let Ok(fds) = fs::read_dir(entry.path().join("fd")) else {
+            continue;
+        };
+        let holds = fds
+            .flatten()
+            .any(|fd| fs::read_link(fd.path()).is_ok_and(|target| paths.contains(&target)));
+        if holds {
+            let name = fs::read_to_string(entry.path().join("comm"))
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default();
+            found.push((pid, name));
+        }
+    }
+    found
+}
+
+/// The collection file and SQLite's companions, which a running client holds.
+pub(crate) fn collection_files(profile: &Path) -> Vec<PathBuf> {
+    [
+        "collection.anki2",
+        "collection.anki2-wal",
+        "collection.anki2-shm",
+    ]
+    .iter()
+    .map(|name| profile.join(name))
+    .collect()
+}
+
+/// Checks that do not rely on the SQLite lock, which a desktop session loses
+/// after its first backup (PLAN 4.4 correction). Runs before the schema peek.
+pub(crate) fn check_not_in_use(profile: &Path, confirmed_closed: bool) -> Result<()> {
+    let holders = other_holders(&collection_files(profile));
+    if !holders.is_empty() {
+        let list = holders
+            .iter()
+            .map(|(pid, name)| format!("{name} (pid {pid})"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(CoreError::InUse(format!(
+            "This profile is open in Anki (or another tanki): {list}. Close it and try again."
+        )));
+    }
+    if !confirmed_closed && fs::symlink_metadata(profile.join("collection.anki2-wal")).is_ok() {
+        return Err(CoreError::ProfileBusy(
+            "collection.anki2-wal exists, so Anki may still be running with this profile open, \
+             or it did not close cleanly (crash or power loss). Close Anki. If it is already \
+             closed, retry with --confirm-closed."
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Refuses export destinations that would overwrite the profile's own files
+/// (collection, companions, media DB) or land inside its media folder.
+pub(crate) fn check_output_path(profile: &Path, path: &Path) -> Result<()> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let parent = absolute
+        .parent()
+        .ok_or_else(|| CoreError::UnsafePath("Export path has no folder".into()))?;
+    let parent = parent.canonicalize()?;
+    let name = absolute
+        .file_name()
+        .ok_or_else(|| CoreError::UnsafePath("Export path has no file name".into()))?;
+    let target = parent.join(name);
+    let protected = collection_files(profile)
+        .into_iter()
+        .chain([profile.join("collection.media.db2")])
+        .any(|p| p == target);
+    if protected || target.starts_with(profile.join("collection.media")) || forbidden(&target) {
+        return Err(CoreError::UnsafePath(format!(
+            "Refusing to write an export to {}",
+            target.display()
+        )));
+    }
+    Ok(())
+}

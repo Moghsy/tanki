@@ -11,8 +11,12 @@ pub enum CoreError {
     ActorStopped,
     /// The operation would force a one-way full sync; repeat it confirmed.
     SchemaChangeRequired,
-    /// A desktop session may still own the profile (WAL file or `/proc`
-    /// holder). The text says why and how to proceed.
+    /// Another process has the collection open although SQLite's lock did
+    /// not say so (found under `/proc`, or by tanki's replacement locks).
+    /// Same meaning as `Locked`; the text names the processes.
+    InUse(String),
+    /// A leftover `collection.anki2-wal` (desktop running or crashed), or the
+    /// files changed during a replacement. The text says how to proceed.
     ProfileBusy(String),
     /// Cancelled through `CollectionActor::cancel_operation`.
     Interrupted,
@@ -32,7 +36,7 @@ impl std::fmt::Display for CoreError {
             Self::SchemaChangeRequired => f.write_str(
                 "This change will require a one-way full sync (upload) on the next sync. Confirm to continue.",
             ),
-            Self::ProfileBusy(s) => f.write_str(s),
+            Self::ProfileBusy(s) | Self::InUse(s) => f.write_str(s),
             Self::Interrupted => f.write_str("Operation cancelled"),
         }
     }
@@ -57,6 +61,25 @@ pub struct OpChanges {
     pub browser_sidebar: bool,
     pub note_text: bool,
     pub study_queues: bool,
+}
+impl OpChanges {
+    /// After the collection was replaced or reopened: refresh everything.
+    pub fn everything() -> Self {
+        Self {
+            card: true,
+            note: true,
+            deck: true,
+            tag: true,
+            notetype: true,
+            config: true,
+            deck_config: true,
+            mtime: true,
+            browser_table: true,
+            browser_sidebar: true,
+            note_text: true,
+            study_queues: true,
+        }
+    }
 }
 /// One node of the deck tree with study counts (`DeckTree{now}`). The root is
 /// a dummy node; display its `children`.

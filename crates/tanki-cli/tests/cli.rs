@@ -249,3 +249,25 @@ fn invalid_keymap_fails_before_collection_open() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("unknown keymap action"));
     assert!(!base.path().join("tanki-fixture").exists());
 }
+
+#[test]
+fn leftover_wal_exits_25_until_confirmed_closed() {
+    let base = generated_fixture();
+    let wal = base.path().join("tanki-fixture/collection.anki2-wal");
+    std::fs::write(&wal, b"").unwrap();
+    let refused = fixture_command(base.path()).arg("decks").output().unwrap();
+    assert_eq!(refused.status.code(), Some(25));
+    assert!(String::from_utf8(refused.stderr)
+        .unwrap()
+        .contains("--confirm-closed"));
+    let confirmed = fixture_command(base.path())
+        .args(["decks", "--confirm-closed"])
+        .output()
+        .unwrap();
+    assert!(
+        confirmed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&confirmed.stderr)
+    );
+    assert!(!wal.exists(), "a clean close removes the WAL");
+}
