@@ -6,6 +6,7 @@ mod browse_ops;
 pub mod config;
 mod data;
 mod edit;
+mod edit_convert;
 mod fixture;
 pub mod notefile;
 mod notes_ops;

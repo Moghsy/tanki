@@ -786,16 +786,34 @@ fn audio(tags: Vec<pb::card_rendering::AvTag>) -> Vec<AudioTag> {
 ///    tanki does not run LaTeX yet, so with generation on, a missing image is
 ///    left missing (pylib would generate it).
 fn render(col: &mut Collection, card_id: i64) -> Result<RenderedCard> {
-    use anki::services::{CardsService, ConfigService, MediaService};
+    use anki::services::CardsService;
     let card = CardsService::get_card(col, pb::cards::CardId { cid: card_id })?;
-    let r = match CardRenderingService::render_existing_card(
+    let rendered = CardRenderingService::render_existing_card(
         col,
         pb::card_rendering::RenderExistingCardRequest {
             card_id,
             browser: false,
             partial_render: true,
         },
-    ) {
+    );
+    let template_error = matches!(rendered, Err(anki::error::AnkiError::TemplateError { .. }));
+    let mut out = finish_render(col, rendered, card.template_idx)?;
+    if !template_error {
+        out.type_answer = study::type_answer(col, &card, &out.question)?;
+    }
+    Ok(out)
+}
+/// Steps 1-4 of `render` for any `RenderCardResponse` (existing or
+/// uncommitted cards, which must be rendered with `partial_render = true`).
+/// A template error becomes the text of both sides. `type_answer` is left
+/// `None`; `render` fills it for existing cards.
+pub(crate) fn finish_render(
+    col: &mut Collection,
+    rendered: std::result::Result<pb::card_rendering::RenderCardResponse, anki::error::AnkiError>,
+    ord: u32,
+) -> Result<RenderedCard> {
+    use anki::services::{ConfigService, MediaService};
+    let r = match rendered {
         Ok(r) => r,
         Err(e @ anki::error::AnkiError::TemplateError { .. }) => {
             let text = e.message(col.tr());
@@ -805,7 +823,7 @@ fn render(col: &mut Collection, card_id: i64) -> Result<RenderedCard> {
                 css: String::new(),
                 question_audio: vec![],
                 answer_audio: vec![],
-                ord: card.template_idx,
+                ord,
                 type_answer: None,
             });
         }
@@ -854,15 +872,14 @@ fn render(col: &mut Collection, card_id: i64) -> Result<RenderedCard> {
     };
     let question = latex(q.text)?;
     let answer = latex(a.text)?;
-    let type_answer = study::type_answer(col, &card, &question)?;
     Ok(RenderedCard {
         question,
         answer,
         css: r.css,
         question_audio: audio(q.av_tags),
         answer_audio: audio(a.av_tags),
-        ord: card.template_idx,
-        type_answer,
+        ord,
+        type_answer: None,
     })
 }
 
