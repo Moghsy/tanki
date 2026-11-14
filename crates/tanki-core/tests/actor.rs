@@ -43,8 +43,19 @@ fn review_undo_backups_and_locking() -> Result<()> {
         milliseconds_taken: 3000,
     })?;
     assert!(changes.recv().unwrap().card);
+    // The live WAL file refuses before SQLite's lock is even tried; with the
+    // override the lock still refuses.
     assert!(matches!(
         CollectionActor::open(dir.path()),
+        Err(CoreError::ProfileBusy(_))
+    ));
+    assert!(matches!(
+        CollectionActor::open_with_options(
+            dir.path(),
+            OpenOptions {
+                confirmed_closed: true
+            }
+        ),
         Err(CoreError::Locked)
     ));
     actor.execute(Command::Undo)?;
@@ -94,8 +105,13 @@ fn data_operations_poll_without_blocking_and_report_idle_progress() -> Result<()
     let actor = CollectionActor::open(dir.path())?;
     assert_eq!(actor.progress().stage, "");
     actor.cancel_operation();
-    let pending = actor.start_data(DataCommand::ListBackups)?;
-    // The cancel flag is reset when the operation starts; the stub refuses.
+    // An import of a missing file fails, stub or not.
+    let pending = actor.start_data(DataCommand::Package(PackageCommand::Import {
+        path: dir.path().join("missing.apkg"),
+        options: None,
+        schema_confirmed: false,
+    }))?;
+    // The cancel flag is reset when the operation starts.
     let result = loop {
         match pending.try_recv() {
             Ok(Some(response)) => break Ok(response),
@@ -103,8 +119,15 @@ fn data_operations_poll_without_blocking_and_report_idle_progress() -> Result<()
             Err(error) => break Err(error),
         }
     };
-    assert!(matches!(result, Err(CoreError::Invalid(_))));
+    assert!(result.is_err());
+    match actor.start_data(DataCommand::ListBackups)?.wait()? {
+        DataResponse::Backups(list) => assert_eq!(list.len(), 1),
+        other => panic!("{other:?}"),
+    }
     // The actor keeps serving after a failed data operation.
-    assert!(matches!(actor.execute(Command::DeckTree)?, Response::DeckTree(_)));
+    assert!(matches!(
+        actor.execute(Command::DeckTree)?,
+        Response::DeckTree(_)
+    ));
     actor.close()
 }

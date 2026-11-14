@@ -49,7 +49,14 @@ fn data_response(response: Response) -> Result<DataResponse> {
     }
 }
 impl CollectionActor {
+    /// Opens with the conservative defaults: a leftover WAL file is refused.
     pub fn open(profile: impl AsRef<Path>) -> Result<Self> {
+        Self::open_with_options(profile, OpenOptions::default())
+    }
+    /// `options.confirmed_closed` accepts a leftover `collection.anki2-wal`
+    /// after the user confirms Anki is closed; it never skips the `/proc`
+    /// check or the lock.
+    pub fn open_with_options(profile: impl AsRef<Path>, options: OpenOptions) -> Result<Self> {
         let profile = profile.as_ref().to_path_buf();
         let (sender, receiver) = mpsc::channel::<Request>();
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
@@ -62,9 +69,12 @@ impl CollectionActor {
             .spawn(move || {
                 let opened = (|| -> Result<(Collection, std::path::PathBuf)> {
                     let profile = safety::validate_profile(&profile)?;
+                    safety::check_not_in_use(&profile, options.confirmed_closed)?;
                     safety::peek_and_backup(&profile)?;
                     std::fs::create_dir_all(profile.join("collection.media"))?;
                     std::fs::create_dir_all(profile.join("backups"))?;
+                    // Partial backups a killed process left in staging.
+                    crate::backup::clear_incoming(&profile.join("backups"))?;
                     let col = open_collection(&profile, &shared)?;
                     // Backup failure fails the open: no command runs unbacked.
                     let (col, saved) = backup_and_relock(col, &profile, &shared)?;
@@ -85,7 +95,47 @@ impl CollectionActor {
                     }
                 };
                 let mut queued = HashMap::new();
-                for (command, reply) in receiver {
+                loop {
+                    // Desktop checks for a due backup every 5 minutes; so does
+                    // the actor while idle. Unforced: Anki's interval applies.
+                    let (command, reply) = match receiver.recv_timeout(PERIODIC_BACKUP) {
+                        Ok(request) => request,
+                        Err(mpsc::RecvTimeoutError::Timeout) => {
+                            col = match backup_and_relock_with(col, &profile, &shared, false) {
+                                Ok((reopened, saved)) => {
+                                    if let Err(error) = saved {
+                                        eprintln!("tanki: periodic backup failed: {error}");
+                                    }
+                                    reopened
+                                }
+                                Err(error) => return Err(error),
+                            };
+                            continue;
+                        }
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    };
+                    let command = match command {
+                        Command::Data(data) if owns_collection(&data) => {
+                            shared.lock().unwrap().reset();
+                            queued.clear();
+                            let (reopened, result) = owned_data(col, &profile, &shared, data);
+                            match reopened {
+                                Ok(reopened) => col = reopened,
+                                Err(error) => {
+                                    let _ = reply.send(result.and(Err(error.clone())));
+                                    return Err(error);
+                                }
+                            }
+                            if result.is_ok() {
+                                subs.lock()
+                                    .unwrap()
+                                    .retain(|sub| sub.send(OpChanges::everything()).is_ok());
+                            }
+                            let _ = reply.send(result.map(Response::Data));
+                            continue;
+                        }
+                        other => other,
+                    };
                     if matches!(command, Command::Backup) {
                         queued.clear();
                         match backup_and_relock(col, &profile, &shared) {
@@ -113,9 +163,10 @@ impl CollectionActor {
                     }
                     let _ = reply.send(result);
                 }
-                // The exit backup is joined before close, so no backup thread
+                // The exit backup follows Anki's schedule, as desktop's close
+                // does, and is joined before close, so no backup thread
                 // outlives the actor. No relock is needed: the collection closes next.
-                let saved = backup(&mut col, &profile).map(|_| ());
+                let saved = crate::backup::create(&mut col, &profile, false).map(|_| ());
                 let closed = col.close(None).map_err(CoreError::from);
                 saved.and(closed)
             })?;
@@ -267,20 +318,6 @@ fn open_collection(profile: &Path, progress: &SharedProgress) -> Result<Collecti
         .set_tr(anki_i18n::I18n::new(&["en"]))
         .build()?)
 }
-/// Forces a backup and waits for its thread. Returns whether Anki read the
-/// collection file, which is the step that loses the file lock (see below).
-fn backup(col: &mut Collection, profile: &Path) -> Result<bool> {
-    match col.maybe_backup(profile.join("backups"), true) {
-        Ok(Some(handle)) => {
-            handle
-                .join()
-                .map_err(|_| CoreError::Other("Backup worker panicked".into()))??;
-            Ok(true)
-        }
-        Ok(None) => Ok(false),
-        Err(error) => Err(error.into()),
-    }
-}
 /// Backs up, then closes and reopens the collection.
 ///
 /// Anki's `maybe_backup` reads `collection.anki2` through a second file
@@ -295,11 +332,19 @@ fn backup(col: &mut Collection, profile: &Path) -> Result<bool> {
 /// the gap, or reopening failed). The inner result is the backup's outcome.
 /// Reopening discards undo history.
 fn backup_and_relock(
-    mut col: Collection,
+    col: Collection,
     profile: &Path,
     progress: &SharedProgress,
 ) -> Result<(Collection, Result<()>)> {
-    let saved = backup(&mut col, profile);
+    backup_and_relock_with(col, profile, progress, true)
+}
+fn backup_and_relock_with(
+    mut col: Collection,
+    profile: &Path,
+    progress: &SharedProgress,
+    force: bool,
+) -> Result<(Collection, Result<()>)> {
+    let saved = crate::backup::create(&mut col, profile, force);
     if matches!(saved, Ok(false)) {
         return Ok((col, Ok(())));
     }
@@ -350,23 +395,158 @@ fn deck(d: pb::decks::DeckTreeNode) -> Deck {
         filtered: d.filtered,
     }
 }
-/// Data operations that need the collection by value (full upload/download,
-/// collection export, restore) or the backup folder are intercepted by the
-/// actor loop before this point once integrated.
-fn data(col: &mut Collection, command: DataCommand) -> Result<DataResponse> {
-    let pending = || Err(CoreError::Invalid("Not integrated yet".into()));
-    match command {
+const PERIODIC_BACKUP: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
+/// Data operations that need the collection by value or the profile folder.
+/// The actor loop runs them through `owned_data`.
+fn owns_collection(command: &DataCommand) -> bool {
+    matches!(
+        command,
         DataCommand::Sync(SyncCommand::Run {
             direction: SyncDirection::Upload | SyncDirection::Download,
             ..
-        }) => pending(),
+        }) | DataCommand::Package(
+            PackageCommand::ExportCollection { .. } | PackageCommand::Restore { .. }
+        ) | DataCommand::Backup { .. }
+            | DataCommand::ListBackups
+    )
+}
+fn data(col: &mut Collection, command: DataCommand) -> Result<DataResponse> {
+    match command {
+        command if owns_collection(&command) => Err(CoreError::Invalid(
+            "This operation is run by the actor loop".into(),
+        )),
         DataCommand::Sync(command) => sync_ops::execute(col, command),
-        DataCommand::Package(
-            PackageCommand::ExportCollection { .. } | PackageCommand::Restore { .. },
-        ) => pending(),
         DataCommand::Package(command) => packages::execute(col, command),
-        DataCommand::Backup { .. } | DataCommand::ListBackups => pending(),
+        DataCommand::Backup { .. } | DataCommand::ListBackups => unreachable!(),
     }
+}
+/// Runs an operation that consumes or replaces the collection. The first
+/// result is the collection to continue with; an error there stops the actor.
+fn owned_data(
+    mut col: Collection,
+    profile: &Path,
+    progress: &SharedProgress,
+    command: DataCommand,
+) -> (Result<Collection>, Result<DataResponse>) {
+    let reopen = |result: Result<DataResponse>| (open_collection(profile, progress), result);
+    match command {
+        DataCommand::ListBackups => (
+            Ok(col),
+            crate::backup::list(profile).map(DataResponse::Backups),
+        ),
+        DataCommand::Backup { force } => {
+            match backup_and_relock_with(col, profile, progress, force) {
+                Ok((col, saved)) => (Ok(col), saved.map(|()| DataResponse::Done)),
+                Err(error) => (Err(error.clone()), Err(error)),
+            }
+        }
+        DataCommand::Package(PackageCommand::ExportCollection {
+            path,
+            media,
+            legacy,
+        }) => {
+            if let Err(error) = safety::check_output_path(profile, &path) {
+                return (Ok(col), Err(error));
+            }
+            reopen(
+                packages::export_collection(col, &path, media, legacy).map(|()| DataResponse::Done),
+            )
+        }
+        DataCommand::Package(PackageCommand::Restore { path, confirmed }) => {
+            if !confirmed {
+                return (
+                    Ok(col),
+                    Err(CoreError::Invalid(
+                        "Restoring replaces the whole collection; confirm to continue.".into(),
+                    )),
+                );
+            }
+            let stage = match replacement::new_stage(profile) {
+                Ok(stage) => stage,
+                Err(error) => return (Ok(col), Err(error)),
+            };
+            if let Err(error) = packages::restore_to_stage(&path, &stage, progress.clone()) {
+                replacement::remove_stage(&stage);
+                return (Ok(col), Err(error));
+            }
+            let (col, installed) = replace(col, profile, &stage, progress, true);
+            (col, installed.map(|()| DataResponse::Done))
+        }
+        DataCommand::Sync(SyncCommand::Run {
+            auth,
+            direction: SyncDirection::Upload,
+            ..
+        }) => reopen(sync_ops::upload(col, auth).map(|()| DataResponse::Done)),
+        DataCommand::Sync(SyncCommand::Run {
+            auth,
+            direction: SyncDirection::Download,
+            media,
+        }) => {
+            let stage = match replacement::new_stage(profile) {
+                Ok(stage) => stage,
+                Err(error) => return (Ok(col), Err(error)),
+            };
+            let downloaded = open_collection(&stage, progress)
+                .and_then(|staged| sync_ops::download(staged, auth.clone()));
+            if let Err(error) = downloaded {
+                replacement::remove_stage(&stage);
+                return (Ok(col), Err(error));
+            }
+            let (reopened, installed) = replace(col, profile, &stage, progress, false);
+            let Ok(mut col) = reopened else {
+                return (reopened, installed.map(|()| DataResponse::Done));
+            };
+            let result = installed.and_then(|()| {
+                if media {
+                    sync_ops::execute(&mut col, SyncCommand::Media { auth })
+                } else {
+                    Ok(DataResponse::Done)
+                }
+            });
+            (Ok(col), result)
+        }
+        DataCommand::Sync(_) | DataCommand::Package(_) => {
+            let result = data(&mut col, command);
+            (Ok(col), result)
+        }
+    }
+}
+/// Backs up, closes the live collection, installs `stage` under
+/// `replacement`'s locks and reopens. The staging folder is removed.
+fn replace(
+    col: Collection,
+    profile: &Path,
+    stage: &Path,
+    progress: &SharedProgress,
+    media: bool,
+) -> (Result<Collection>, Result<()>) {
+    let finish = |col: Result<Collection>, result: Result<()>| {
+        replacement::remove_stage(stage);
+        (col, result)
+    };
+    let col = match backup_and_relock(col, profile, progress) {
+        Ok((col, Ok(()))) => col,
+        Ok((col, Err(error))) => return finish(Ok(col), Err(error)),
+        Err(error) => return finish(Err(error.clone()), Err(error)),
+    };
+    if let Err(error) = col.close(None) {
+        let error = CoreError::from(error);
+        return finish(open_collection(profile, progress), Err(error));
+    }
+    let installed = replacement::install(profile, stage, media);
+    // Never reopen beside another process that has the file open: it may
+    // have lost its lock, and the lock would not keep the two apart.
+    let holders = safety::other_holders(&safety::collection_files(profile));
+    let reopened = if holders.is_empty() {
+        open_collection(profile, progress)
+    } else {
+        Err(CoreError::InUse(format!(
+            "Another program opened the collection during the replacement (pid {}); tanki closed it.",
+            holders[0].0
+        )))
+    };
+    finish(reopened, installed)
 }
 fn execute(
     col: &mut Collection,
@@ -645,3 +825,8 @@ fn render(col: &mut Collection, card_id: i64) -> Result<RenderedCard> {
 #[cfg(test)]
 #[path = "sync_spike.rs"]
 mod sync_spike;
+/// Forced backup for the sync spike's fixture.
+#[cfg(test)]
+fn backup(col: &mut Collection, profile: &Path) -> Result<bool> {
+    crate::backup::create(col, profile, true)
+}

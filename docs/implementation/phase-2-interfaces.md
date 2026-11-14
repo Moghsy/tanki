@@ -130,3 +130,21 @@ ordinary import never silently replaces a collection because of a filename.
   required, 22 auth required, 23 sync not configured, 24 schema change needs
   confirmation, 25 profile busy (WAL or `/proc`). Stream CLI modules return an
   error type exposing `exit_code() -> u8`; the lead downcasts it in `main`.
+
+## Safety integration (lead, 2026-11-14)
+
+- `CoreError::InUse(String)`: another process has the collection open (found
+  under `/proc`, or refused by the replacement's OFD locks); exit code 20, the
+  same as `Locked`. `ProfileBusy(String)` now means only a leftover
+  `collection.anki2-wal` (or files changing during a replacement); exit 25,
+  retry with `--confirm-closed` (global CLI flag, `OpenOptions`).
+- The actor runs `Backup { force }`, `ListBackups`, `ExportCollection`,
+  `Restore`, and full upload/download itself (`owned_data` in `actor.rs`).
+  Restore and full download go to `<profile>/.tanki-stage-<ns>/` and are
+  installed by `replacement::install`. After those operations every
+  subscriber receives `OpChanges::everything()`.
+- Backups are written by Anki into `backups/.tanki-incoming/` and renamed into
+  `backups/` once complete (`backup.rs`); interval and retention are applied
+  by tanki, ported from Anki and parity-tested. Exit backups follow Anki's
+  schedule (unforced), the open backup is forced, and an idle actor checks
+  every 5 minutes as desktop does.
