@@ -308,10 +308,7 @@ fn heading(line: &str, number: usize) -> Result<(String, bool), ParseError> {
 }
 
 fn plain_body(lines: &[&str]) -> String {
-    lines
-        .join("\n")
-        .trim_matches([' ', '\t', '\n'])
-        .to_owned()
+    lines.join("\n").trim_matches([' ', '\t', '\n']).to_owned()
 }
 
 fn quoted_body(lines: &[&str], first: usize) -> Result<String, ParseError> {
@@ -399,7 +396,10 @@ pub fn parse_located(text: &str) -> Result<Vec<(usize, FileNote)>, ParseError> {
             match key {
                 "id" => {
                     note.id = Some(value.parse().or_else(|_| {
-                        error(number, format!("id must be a note id number, not {value:?}"))
+                        error(
+                            number,
+                            format!("id must be a note id number, not {value:?}"),
+                        )
                     })?)
                 }
                 "mtime" => {
@@ -599,11 +599,12 @@ pub fn plan(ctx: &PlanContext<'_>, edited: &[FileNote]) -> Plan {
             }
             None => plan_add(ctx, index, note, &mut messages, &mut out),
         }
-        out.refusals.extend(messages.into_iter().map(|message| Refusal {
-            index,
-            note_id: note.id,
-            message,
-        }));
+        out.refusals
+            .extend(messages.into_iter().map(|message| Refusal {
+                index,
+                note_id: note.id,
+                message,
+            }));
     }
     out
 }
