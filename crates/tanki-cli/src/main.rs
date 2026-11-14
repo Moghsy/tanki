@@ -347,12 +347,12 @@ fn run(args: Args) -> Result<()> {
         }
         Some(CliCommand::Add(command)) => {
             with_collection(&profile_path(&args)?, &args, |actor| {
-                note_commands::run_add(actor, command, args.json)
+                note_commands::run_add(actor, command, args.json, config_path(&args).as_deref())
             })?;
         }
         Some(CliCommand::Edit(command)) => {
             with_collection(&profile_path(&args)?, &args, |actor| {
-                note_commands::run_edit(actor, command, args.json)
+                note_commands::run_edit(actor, command, args.json, config_path(&args).as_deref())
             })?;
         }
         Some(CliCommand::Search(command)) => {

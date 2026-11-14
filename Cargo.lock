@@ -5156,6 +5156,7 @@ dependencies = [
  "tanki-term",
  "tanki-tui",
  "tempfile",
+ "unicode-width",
 ]
 
 [[package]]

@@ -518,3 +518,40 @@ fn exit_add_search_edit_delete() {
         ""
     );
 }
+
+#[test]
+fn global_config_editor_wins_over_visual() {
+    let base = fixture();
+    let b = base.path();
+    let script = b.join("fill.sh");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\nsed -i 's/^## Front$/&\\nfrom config editor/' \"$1\"\n",
+    )
+    .unwrap();
+    make_executable(&script);
+    let config = b.join("custom-config.toml");
+    std::fs::write(
+        &config,
+        format!("[editor]\ncommand = \"{}\"\n", script.display()),
+    )
+    .unwrap();
+    let output = tanki(b)
+        .env("VISUAL", "/bin/false")
+        .arg("--config")
+        .arg(&config)
+        .args(["add", "--edit", "--type", "Basic"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let id: i64 = String::from_utf8(output.stdout)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert_eq!(stored(b, id).fields[0], "from config editor");
+}

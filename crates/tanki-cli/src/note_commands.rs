@@ -230,7 +230,12 @@ fn split_tags(tags: &[String]) -> Vec<String> {
         .collect()
 }
 
-pub fn run_add(actor: &CollectionActor, args: &AddArgs, json: bool) -> Result<()> {
+pub fn run_add(
+    actor: &CollectionActor,
+    args: &AddArgs,
+    json: bool,
+    config: Option<&std::path::Path>,
+) -> Result<()> {
     let deck_list = decks(actor)?;
     let (default_deck, default_type) =
         match notes(actor, NoteCommand::DefaultsForAdding { home_deck: 0 })? {
@@ -268,7 +273,7 @@ pub fn run_add(actor: &CollectionActor, args: &AddArgs, json: bool) -> Result<()
             .find(|d| d.id == deck_id)
             .map(|d| d.name.clone());
         let template = notefile::new_note(notetype, deck_name.as_deref(), &tags);
-        let command = editor_command();
+        let command = editor_command(config);
         let outcome = editor_flow::add_notes(
             actor,
             &[template],
@@ -355,8 +360,10 @@ pub fn run_add(actor: &CollectionActor, args: &AddArgs, json: bool) -> Result<()
 
 // ---- edit --------------------------------------------------------------------
 
-fn editor_command() -> Vec<String> {
-    tanki_core::config::default_path()
+fn editor_command(config: Option<&std::path::Path>) -> Vec<String> {
+    config
+        .map(std::path::Path::to_path_buf)
+        .or_else(tanki_core::config::default_path)
         .and_then(|path| tanki_core::config::Config::load(&path).ok())
         .unwrap_or_default()
         .editor
@@ -501,7 +508,12 @@ fn report_outcome(outcome: Outcome, json: bool, ids_only: bool) -> Result<()> {
     }
 }
 
-pub fn run_edit(actor: &CollectionActor, args: &EditArgs, json: bool) -> Result<()> {
+pub fn run_edit(
+    actor: &CollectionActor,
+    args: &EditArgs,
+    json: bool,
+    config: Option<&std::path::Path>,
+) -> Result<()> {
     if let Some(path) = &args.file {
         let text = read_input(path)?;
         let ids = if args.targets.is_empty() {
@@ -520,7 +532,7 @@ pub fn run_edit(actor: &CollectionActor, args: &EditArgs, json: bool) -> Result<
         return report_applied(applied, json, false);
     }
     let ids = resolve_targets(actor, &args.targets)?;
-    let command = editor_command();
+    let command = editor_command(config);
     let outcome = editor_flow::edit_notes(actor, &ids, &FlowOptions::default(), &mut |path| {
         editor_flow::spawn_editor(&command, path)
     })
@@ -530,30 +542,8 @@ pub fn run_edit(actor: &CollectionActor, args: &EditArgs, json: bool) -> Result<
 
 // ---- search ------------------------------------------------------------------
 
-fn char_width(c: char) -> usize {
-    let u = c as u32;
-    match u {
-        0..=0x1f | 0x7f..=0x9f => 0,
-        0x300..=0x36f | 0x200b..=0x200f | 0xfe00..=0xfe0f | 0x20d0..=0x20ff => 0,
-        0x1100..=0x115f
-        | 0x2e80..=0x303e
-        | 0x3041..=0x33ff
-        | 0x3400..=0x4dbf
-        | 0x4e00..=0x9fff
-        | 0xa000..=0xa4cf
-        | 0xac00..=0xd7a3
-        | 0xf900..=0xfaff
-        | 0xfe30..=0xfe6f
-        | 0xff00..=0xff60
-        | 0xffe0..=0xffe6
-        | 0x1f300..=0x1f64f
-        | 0x1f900..=0x1f9ff
-        | 0x20000..=0x3fffd => 2,
-        _ => 1,
-    }
-}
 fn text_width(s: &str) -> usize {
-    s.chars().map(char_width).sum()
+    unicode_width::UnicodeWidthStr::width(s)
 }
 fn one_line(s: &str) -> String {
     s.chars()
