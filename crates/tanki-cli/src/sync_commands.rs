@@ -378,8 +378,9 @@ fn sync(
             return Err(SyncCliError::FullSyncChoiceRequired { upload, download }.into());
         }
     }
-    // After a one-way sync, media follows (a normal run already did it).
-    if direction != SyncDirection::Normal && media {
+    // Media follows a full upload. A normal run and a full download (the
+    // actor syncs media after installing it) have done it already.
+    if direction == SyncDirection::Upload && media {
         let auth = stored_auth(profile, config_path)?;
         match operation(actor, SyncCommand::Media { auth }, io.err) {
             Ok(_) => {}
@@ -966,7 +967,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs lead actor interception"]
     fn upload_then_normal_sync() {
         let server = Server::start();
         let (_profile, actor) = new_actor();
@@ -993,7 +993,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs lead actor interception"]
     fn download_into_fresh_profile() {
         let server = Server::start();
         let (_a_dir, a) = new_actor();

@@ -178,9 +178,8 @@ impl SyncUi {
                 }
             }
             Ok(_) => match request {
-                SyncRequest::Upload | SyncRequest::Download if self.media => {
-                    self.start(SyncRequest::Media)
-                }
+                // The actor syncs media after a full download itself.
+                SyncRequest::Upload if self.media => self.start(SyncRequest::Media),
                 SyncRequest::Upload => {
                     self.done("Full upload complete.", String::new());
                     SyncIntent::Finished { new_endpoint: None }
@@ -619,18 +618,29 @@ mod tests {
                 ..
             }
         ));
-        ui.on_key(key(KeyCode::Down));
+        let mut download = ui.clone();
+        // Media follows a full upload, then the app refreshes.
         assert_eq!(
             ui.on_key(key(KeyCode::Enter)),
-            SyncIntent::Start(SyncRequest::Download)
+            SyncIntent::Start(SyncRequest::Upload)
         );
-        // After the one-way sync, media follows, then the app refreshes.
         assert_eq!(
             ui.on_response(Ok(DataResponse::Done)),
             SyncIntent::Start(SyncRequest::Media)
         );
         assert_eq!(
             ui.on_response(Ok(DataResponse::Done)),
+            SyncIntent::Finished { new_endpoint: None }
+        );
+        assert!(matches!(ui.stage(), SyncStage::Done { .. }));
+        // The actor syncs media after a full download itself.
+        download.on_key(key(KeyCode::Down));
+        assert_eq!(
+            download.on_key(key(KeyCode::Enter)),
+            SyncIntent::Start(SyncRequest::Download)
+        );
+        assert_eq!(
+            download.on_response(Ok(DataResponse::Done)),
             SyncIntent::Finished { new_endpoint: None }
         );
         assert!(matches!(ui.stage(), SyncStage::Done { .. }));
