@@ -2,9 +2,13 @@
 
 mod actor;
 mod backup;
+mod browse_ops;
 pub mod config;
 mod data;
+mod edit;
 mod fixture;
+pub mod notefile;
+mod notes_ops;
 #[doc(hidden)]
 pub mod packages;
 mod replacement;
@@ -14,8 +18,10 @@ mod sync;
 #[doc(hidden)]
 pub mod sync_ops;
 mod types;
+mod writeback;
 pub use actor::{CollectionActor, PendingOperation};
 pub use data::*;
+pub use edit::*;
 pub use safety::validate_profile;
 pub use sync::SyncEndpoint;
 pub use types::*;

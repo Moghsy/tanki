@@ -336,6 +336,10 @@ pub struct UndoStatus {
 #[derive(Debug, Clone)]
 pub enum Command {
     Data(crate::DataCommand),
+    /// Notes, note types, tags, media (Phase 3) -> `Edit`.
+    Notes(crate::NoteCommand),
+    /// Search and browser (Phase 3) -> `Edit`.
+    Browse(crate::BrowseCommand),
     /// -> `DeckTree` (with counts; rolls the day over if needed).
     DeckTree,
     /// Cards of the current deck -> `Queue`. Idempotent; caches each card's
@@ -457,6 +461,7 @@ pub enum Command {
 #[derive(Debug, Clone)]
 pub enum Response {
     Data(crate::DataResponse),
+    Edit(crate::EditResponse),
     DeckTree(Deck),
     Queue(Queue),
     Rendered(RenderedCard),
@@ -485,6 +490,7 @@ impl Response {
             | Self::Undone { changes, .. }
             | Self::Answered(AnswerOutcome { changes, .. })
             | Self::Data(crate::DataResponse::Imported { changes, .. }) => Some(changes),
+            Self::Edit(edit) => edit.changes(),
             _ => None,
         }
     }

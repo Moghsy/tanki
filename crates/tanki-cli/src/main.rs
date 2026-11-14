@@ -1,3 +1,4 @@
+mod note_commands;
 mod package_commands;
 mod sync_commands;
 
@@ -81,6 +82,14 @@ enum CliCommand {
     Export(package_commands::ExportArgs),
     /// Create, list or restore backups (restore replaces the collection).
     Backup(package_commands::BackupArgs),
+    /// Add a note from flags, a note file, or stdin.
+    Add(note_commands::AddArgs),
+    /// Edit matching notes in $EDITOR (only changed fields are written).
+    Edit(note_commands::EditArgs),
+    /// Search cards or notes with Anki's search syntax.
+    Search(note_commands::SearchArgs),
+    /// Delete matching notes and their cards.
+    Delete(note_commands::DeleteArgs),
     /// Dump fixture card HTML/audio for the Phase 0 comparison harness.
     #[command(hide = true)]
     FixtureDump,
@@ -336,6 +345,26 @@ fn run(args: Args) -> Result<()> {
                 package_commands::run_backup(actor, command, args.json)
             })?;
         }
+        Some(CliCommand::Add(command)) => {
+            with_collection(&profile_path(&args)?, &args, |actor| {
+                note_commands::run_add(actor, command, args.json)
+            })?;
+        }
+        Some(CliCommand::Edit(command)) => {
+            with_collection(&profile_path(&args)?, &args, |actor| {
+                note_commands::run_edit(actor, command, args.json)
+            })?;
+        }
+        Some(CliCommand::Search(command)) => {
+            with_collection(&profile_path(&args)?, &args, |actor| {
+                note_commands::run_search(actor, command, args.json)
+            })?;
+        }
+        Some(CliCommand::Delete(command)) => {
+            with_collection(&profile_path(&args)?, &args, |actor| {
+                note_commands::run_delete(actor, command, args.json)
+            })?;
+        }
         Some(CliCommand::FixtureDump) => {
             // A development harness: never resolves a default (real) base.
             if args.base.is_none() {
@@ -413,6 +442,9 @@ fn exit_code(error: &(dyn std::error::Error + 'static)) -> u8 {
         return error.exit_code();
     }
     if let Some(error) = error.downcast_ref::<sync_commands::SyncCliError>() {
+        return error.exit_code();
+    }
+    if let Some(error) = error.downcast_ref::<note_commands::NoteCliError>() {
         return error.exit_code();
     }
     match error.downcast_ref::<CoreError>() {

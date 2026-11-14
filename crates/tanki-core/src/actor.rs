@@ -594,6 +594,11 @@ fn execute(
 ) -> Result<Response> {
     Ok(match command {
         Command::Data(command) => Response::Data(data(col, command)?),
+        Command::Notes(NoteCommand::UpdateNotes { updates }) => Response::Edit(
+            EditResponse::Updated(writeback::update_notes(col, updates)?),
+        ),
+        Command::Notes(command) => Response::Edit(notes_ops::execute(col, command)?),
+        Command::Browse(command) => Response::Edit(browse_ops::execute(col, command)?),
         Command::DeckTree => Response::DeckTree(deck(study::deck_tree(col)?)),
         Command::Queue { limit } => Response::Queue(study::queue(col, limit, queued)?),
         Command::Answer {

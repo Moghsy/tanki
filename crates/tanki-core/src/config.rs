@@ -60,6 +60,51 @@ pub struct SyncSettings {
 #[serde(default)]
 pub struct ProfileConfig {
     pub sync: SyncSettings,
+    /// Browser search history, newest first (desktop keeps 30 in its
+    /// profile, R6 §1.5). tanki state, never stored in the collection.
+    pub search_history: Vec<String>,
+}
+
+/// Desktop keeps this many searches (`browser.py`).
+pub const SEARCH_HISTORY_LIMIT: usize = 30;
+
+impl ProfileConfig {
+    /// Moves `search` to the front, dropping duplicates and the oldest
+    /// entries beyond the limit. Blank searches are not recorded.
+    pub fn push_search(&mut self, search: &str) {
+        let search = search.trim();
+        if search.is_empty() {
+            return;
+        }
+        self.search_history.retain(|s| s != search);
+        self.search_history.insert(0, search.to_owned());
+        self.search_history.truncate(SEARCH_HISTORY_LIMIT);
+    }
+}
+
+/// Editor settings (tanki state, PLAN 4.5).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EditorSettings {
+    /// Command for `$EDITOR` round trips; falls back to `$VISUAL`, then
+    /// `$EDITOR`, then `vi`. Split on whitespace; the file path is appended.
+    pub command: Option<String>,
+}
+
+impl EditorSettings {
+    /// The editor command line to run, as program and arguments.
+    pub fn resolve(&self) -> Vec<String> {
+        let env = |name: &str| std::env::var(name).ok().filter(|v| !v.trim().is_empty());
+        self.command
+            .clone()
+            .filter(|c| !c.trim().is_empty())
+            .or_else(|| env("VISUAL"))
+            .or_else(|| env("EDITOR"))
+            .unwrap_or_else(|| "vi".to_owned())
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,6 +114,7 @@ pub struct Config {
     pub profiles: BTreeMap<String, ProfileConfig>,
     /// Collections tanki has opened before (the first-open rule, PLAN 4.4).
     pub seen_collections: BTreeSet<String>,
+    pub editor: EditorSettings,
 }
 
 impl Config {
@@ -248,6 +294,31 @@ fn write_atomic(path: &Path, data: &[u8], mode: u32) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn search_history_is_newest_first_unique_and_capped() {
+        let mut profile = ProfileConfig::default();
+        for i in 0..40 {
+            profile.push_search(&format!("deck:{i}"));
+        }
+        profile.push_search("deck:35");
+        profile.push_search("   ");
+        assert_eq!(profile.search_history.len(), SEARCH_HISTORY_LIMIT);
+        assert_eq!(profile.search_history[0], "deck:35");
+        assert_eq!(profile.search_history[1], "deck:39");
+        assert_eq!(
+            profile
+                .search_history
+                .iter()
+                .filter(|s| *s == "deck:35")
+                .count(),
+            1
+        );
+        let mut config = Config::default();
+        config.profile_mut("p").push_search("tag:x");
+        let text = toml::to_string(&config).unwrap();
+        assert_eq!(toml::from_str::<Config>(&text).unwrap(), config);
+    }
 
     #[test]
     fn credentials_path_is_beside_config() {
