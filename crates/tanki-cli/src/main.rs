@@ -397,6 +397,7 @@ fn run(args: Args) -> Result<()> {
                             Start::Decks
                         },
                         keymap,
+                        config: config_path(&args),
                     },
                 )?;
                 auto_sync(actor, &args, "close");

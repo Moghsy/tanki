@@ -1,6 +1,6 @@
 # tanki — plan for a terminal Anki client
 
-Status: **Phase 1 complete (2026-11-13). All streams are integrated; the lead's full build/tests/clippy and exact Python study replay pass. The user confirmed fixture images, audio and terminal restoration. Results are in section 13 and `docs/implementation/phase-1-results.md`. Phase 2 has not started. The pin moved to the 26.09.4 release tag during Phase 0 (4.1).** Written 2026-11-12 against the Anki checkout at `../anki` (`main` at `4aa9c0836`, 2026-08-30, just past the 26.08.1 tag).
+Status: **Phase 1 complete (2026-11-13). Phase 2 integrated (2026-11-14); see below. All Phase 1 streams are integrated; the lead's full build/tests/clippy and exact Python study replay pass. The user confirmed fixture images, audio and terminal restoration. Results are in section 13 and `docs/implementation/phase-1-results.md`. Phase 2 (sync and data safety) is integrated (2026-11-14): its automated exit test passes and the real-profile guard is removed; results are in section 13 and `docs/implementation/phase-2-interfaces.md`. The pin moved to the 26.09.4 release tag during Phase 0 (4.1).** Written 2026-11-12 against the Anki checkout at `../anki` (`main` at `4aa9c0836`, 2026-08-30, just past the 26.08.1 tag).
 
 ## 0. How to use this document
 
@@ -668,18 +668,18 @@ Read first: R5 (all), R1 §4–§5, R9 §3.
 Streams:
 
 - **Safety** (`tanki-core`):
-  - [ ] First-open procedure (4.4): version peek, pre-upgrade copy, forced backup.
-  - [ ] Lock-error mapping and exit code; two-process tests.
-  - [ ] Desktop-is-running checks that do not rely on the SQLite lock (4.4 correction): refuse on an existing `collection.anki2-wal` before the peek, with a confirmed-closed override; on Linux, refuse when another process holds `collection.anki2` (`/proc`). Two-process tests where the holder has already made a backup.
-  - [ ] Backups: Anki's schedule/retention, wait-on-exit, list, restore (lock + backup first).
-  - [ ] Schema-change confirmation hook used by every caller that can trigger it.
+  - [x] First-open procedure (4.4): version peek, pre-upgrade copy, forced backup. (The backup is forced only for collections not in the config's seen list; later opens follow Anki's schedule.)
+  - [x] Lock-error mapping and exit code; two-process tests. (Exit 20 for the SQLite lock and for `/proc` holders, `CoreError::InUse`.)
+  - [x] Desktop-is-running checks that do not rely on the SQLite lock (4.4 correction): refuse on an existing `collection.anki2-wal` before the peek, with a confirmed-closed override (`--confirm-closed`, exit 25); on Linux, refuse when another process holds `collection.anki2` (`/proc`). Two-process tests where the holder has already made a backup.
+  - [x] Backups: Anki's schedule/retention, wait-on-exit, list, restore (lock + backup first). (Written atomically; see 13.)
+  - [x] Schema-change confirmation hook used by every caller that can trigger it. (Phase 2 caller: `.apkg` import. Later phases' Check Database and note type changes must use it too.)
 - **Sync** (`tanki-core`, `tanki-tui`, `tanki-cli`):
-  - [ ] Everything in 8.9: configure/login, AnkiWeb host refusal, first-time warning, normal sync, conflict, full upload/download, media sync with status polling, abort, auto-sync, progress UI.
-  - [ ] `tanki sync-server` with docs.
+  - [x] Everything in 8.9: configure/login, AnkiWeb host refusal, first-time warning, normal sync, conflict, full upload/download, media sync with status polling, abort, auto-sync, progress UI. (TUI: `y` syncs from the deck list and overview, with progress, cancel on Esc or Ctrl+C, and the upload/download choice; login stays in the CLI. Import `I`, export `E`, backup `B`, restore `R`. Auto-sync runs when the TUI opens and closes; periodic media sync is not done. Credentials live in a 0600 file; the OS keyring is deferred. CLI Ctrl+C kills instead of cancelling.)
+  - [x] `tanki sync-server` with docs (`docs/sync-server.md`).
 - **Packages** (`tanki-core`, `tanki-cli`, `tanki-tui`):
-  - [ ] `.apkg` import with options and result log; `.apkg` export; `.colpkg` export and restore.
-  - [ ] `tanki sync`, `tanki import`, `tanki export`, `tanki backup`.
-- [ ] Remove the `TANKI_ALLOW_REAL_PROFILE` guard, and the hard refusal of real Anki base locations in `safety.rs`, once the exit test passes.
+  - [x] `.apkg` import with options and result log; `.apkg` export; `.colpkg` export and restore. (Legacy `.colpkg` export is refused: it would leave the live collection at schema 11.)
+  - [x] `tanki sync`, `tanki import`, `tanki export`, `tanki backup`.
+- [x] Remove the `TANKI_ALLOW_REAL_PROFILE` guard, and the hard refusal of real Anki base locations in `safety.rs`, once the exit test passes.
 
 Exit test (automated, in-process server): two clients — one driven by Anki's Python package, one by tanki — share a server; edits and reviews made on each arrive on the other with no full-sync prompt and identical media. Plus: restore-while-locked is refused; a killed process leaves no partial backup.
 
@@ -783,7 +783,10 @@ Each item names the phase that resolves it. Replace the entry with the result wh
 | **Build hash (2026-11-13).** Cannot be customised from tanki's build (see 4.3); it is empty, and the server accepted the resulting client string for every request. | 4.3 | Phase 0 spike A done |
 | **Cross-process lock is lost after any backup (found 2026-11-13).** See the correction in 4.4. tanki now reopens after each backup; a running desktop that has already dropped its lock will be detected by the WAL-file and `/proc` checks decided in 4.4. Also seen: backup file names have one-second resolution, so two backups in the same second overwrite each other. | R5 | tanki side done in Phase 0; desktop-side checks are built in Phase 2 |
 | The CI workflow on a real runner: never run (no remote). The runner's distro `protoc` is 3.21, which is untested here; Anki's proto files are plain proto3, so it should work | 4.1 | First push |
-| Two different servers on one collection force a full sync | decision 2 | Phase 2 tests |
+| **Two servers on one collection (2026-11-14): confirmed.** A collection synced with server A, pointed at server B that already holds data, reports `Full{upload, download}`; after uploading to B, going back to A again reports `Full{upload, download}`. Every switch forces a one-way full sync, so the first-time warning (shown only when `SyncReport::synced_before`) stands. Test: `tests/sync_phase2.rs`. | decision 2 | Phase 2 verified |
+| **Phase 2 exit test (2026-11-14): passes.** `tests/sync_interop.rs` + `scripts/sync-interop.py`: one in-process Anki sync server on loopback; tanki (actor, full upload through the actor) and the pinned Anki 26.09.4 Python package (its own full download on a temp copy) sync three rounds of edits, marks, flags, reviews and media both ways. After the initial one-way sync no full-sync prompt appears; 26 notes, 36 cards and 13 review-log rows are exactly equal (all service fields including mod and usn) and 5 media files byte-identical. Restore-while-locked is refused at two levels: `replacement::tests` (a holder with SQLite's lock is refused by OFD locks; one that lost its lock after a backup by `/proc`) and `safety_phase2::restore_while_another_process_holds_the_file_is_refused` through the actor, live collection intact. A killed process leaves no partial backup: `safety_phase2::killed_process_leaves_no_partial_backup` kills a backup loop six times (two kills landed mid-write in the recorded run); every package in `backups/` is complete. | Phase 2 exit | Phase 2 verified |
+| **Anki's backups are not atomic (found 2026-11-14; the source wins over R5).** `export_colpkg_from_data` creates `backups/backup-<time>.colpkg` with `File::create` and fills it from a thread, so a killed process leaves a truncated package where desktop's "Open Backup" lists it. tanki has Anki write into `backups/.tanki-incoming/`, syncs and renames the finished file into `backups/`, and applies Anki's interval check and retention itself (ported from `collection/backup.rs`; `backup::tests::retention_matches_anki` compares it with Anki's own thinning over two years of history). Same-second backups take the next free second instead of replacing each other. | R5 §7.2 | Phase 2 verified |
+| **Replacing the collection (2026-11-14).** Restore and full download unpack into `<profile>/.tanki-stage-<ns>/`; after a forced backup and close, `replacement::install` takes Linux OFD write locks over SQLite's lock bytes on both files, re-checks `/proc`, verifies inode identity and the absence of a WAL, removes stale `-shm` index files, moves restored media in, and renames. A clean close leaves `collection.anki2-shm` behind (only an index SQLite rebuilds), which the first version wrongly refused; the CLI smoke test found it. Other platforms refuse replacement. If another process opened the file meanwhile, tanki does not reopen beside it: the actor stops with `InUse`. | 4.4 | Phase 2 verified |
 | Kitty graphics in VS Code's terminal; placeholders in Konsole; bidi per terminal; text sizing outside kitty | R8 | Phase 4, best effort |
 | Exact browser output for indent/justify markup; prevalence of JS in shared decks | R3, R7 | Phase 3–4 corpus |
 | The AnkiConnect action subset real tools need | R9 | Phase 6 |
@@ -800,7 +803,7 @@ User-approved Phase 0 exceptions (2026-11-12): Spike C may update only `col.ver`
 **Data safety**
 
 1. Never open, copy, read or modify anything under `~/.local/share/Anki2` (or the user's `ANKI_BASE`). All development and tests use generated fixture collections in temp folders via `--base`. Only the user runs tanki on the real profile, and only after Phase 2's exit test passes.
-2. Until then, keep the `TANKI_ALLOW_REAL_PROFILE` guard in place.
+2. Until then, keep the `TANKI_ALLOW_REAL_PROFILE` guard in place. *(Removed at the Phase 2 exit, 2026-11-14. Rule 1 still binds the implementing agent: tests and agent runs always pass a temp `--base`; CLI tests run with a fake `HOME`.)*
 3. Never read or write `prefs21.db`; never touch `addons21/`.
 4. No raw SQLite access to a collection, except the read-only schema-version peek in 4.4.
 5. Back up before: the first open of an unseen collection, full download, collection restore, Check Database, Check Media.
