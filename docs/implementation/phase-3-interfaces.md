@@ -145,3 +145,43 @@ Errors with their own exit code use `NoteCliError { message, code }`;
   updates of the same note within 60 s into one undo step
   (`notes/undo.rs`), so two editor saves of one note a minute apart undo
   together.
+- **Browser** (merged): `browse_ops.rs`, `browser_ui` (+ `dialog`,
+  `sidebar`), `completion.rs`. Source corrections: R6 §3.1's sidebar
+  order is wrong; `SidebarStage` is Saved, Today, Flags, Card State,
+  Decks, Note Types, Tags. A search request without an order means no
+  order in rslib; `SearchOrder::Default` follows pylib and builds the
+  config's sort column as a built-in sort when sortable. New decks start
+  collapsed (`Deck::new_normal`). A new child tag takes its existing
+  parent's case.
+- **CLI** (merged): `note_commands.rs`. `--config` reaches the editor
+  lookup; tables use `unicode-width`.
+- **Integration** (merged): the add screen and browser are `Layer`s
+  (`App::layers`) over the current screen, which keeps its state (the
+  reviewer's timer, auto-advance and audio pause). Keys: `a` add (decks,
+  overview, congrats, reviewer), `b` browse (from the reviewer on
+  `cid:<card>`), `e` edit the current note in the reviewer (also in More).
+  Remappable scopes `add` and `browser` bind only Ctrl+Q and F1; actions
+  `add-note`, `browse`, `edit-note`. `App::set_editor` injects the
+  `$EDITOR` runner; `terminal.rs` pauses input, leaves raw mode and the
+  alternate screen around it. Tag completion uses `Completion::new(true)`
+  (opens while typing; Tab is also next-field). Added
+  `SidebarData.section_collapsed` + `BrowseCommand::SetSectionCollapsed`
+  (desktop's `COLLAPSE_*` keys), `BrowserSettings.default_search`
+  (`DefaultSearchText`), and `From<AnkiError>` now maps `SearchError` and
+  `InvalidRegex` to `CoreError::Invalid` (isolation marks stripped).
+- **Build note:** `cargo test -p tanki-core` alone builds a second copy of
+  anki with different features; pass `-p tanki-core -p tanki-tui` together.
+
+## Manual check (user)
+
+On a fixture (`cargo run -p xtask -- study-fixtures --base /tmp/t` or any
+temp `--base`), run `tanki --base <dir>`:
+
+1. `a` on the deck list: type a Basic note, tags complete while typing,
+   Alt+P shows the preview, Ctrl+S (or Alt+Enter) adds it.
+2. Alt+X on a field: `$EDITOR` takes the terminal; save and quit; the
+   screen comes back intact with the field updated.
+3. `b`: search, sort (`S`), toggle notes mode (`M`), the sidebar (`Tab`),
+   `Enter` on a row opens `$EDITOR` on the note; the screen restores.
+4. In review, `e` edits the current note; after saving, the card shows the
+   change.

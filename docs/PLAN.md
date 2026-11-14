@@ -1,6 +1,6 @@
 # tanki — plan for a terminal Anki client
 
-Status: **Phase 1 complete (2026-11-13). Phase 2 complete (2026-11-14); see below. All Phase 1 streams are integrated; the lead's full build/tests/clippy and exact Python study replay pass. The user confirmed fixture images, audio and terminal restoration. Results are in section 13 and `docs/implementation/phase-1-results.md`. Phase 2 (sync and data safety) is complete (2026-11-14): its automated exit test passes, the real-profile guard is removed, and the user confirmed the desktop-running checks on the real profile and the TUI data screens on a fixture; results are in section 13 and `docs/implementation/phase-2-interfaces.md`. The pin moved to the 26.09.4 release tag during Phase 0 (4.1).** Written 2026-11-12 against the Anki checkout at `../anki` (`main` at `4aa9c0836`, 2026-08-30, just past the 26.08.1 tag).
+Status: **Phase 1 complete (2026-11-13). Phase 2 complete (2026-11-14); see below. All Phase 1 streams are integrated; the lead's full build/tests/clippy and exact Python study replay pass. The user confirmed fixture images, audio and terminal restoration. Results are in section 13 and `docs/implementation/phase-1-results.md`. Phase 2 (sync and data safety) is complete (2026-11-14): its automated exit test passes, the real-profile guard is removed, and the user confirmed the desktop-running checks on the real profile and the TUI data screens on a fixture; results are in section 13 and `docs/implementation/phase-2-interfaces.md`. Phase 3 (add, edit, browse) is implemented and its automated exit test passes (2026-11-14); the user's terminal check is pending. The pin moved to the 26.09.4 release tag during Phase 0 (4.1).** Written 2026-11-12 against the Anki checkout at `../anki` (`main` at `4aa9c0836`, 2026-08-30, just past the 26.08.1 tag).
 
 ## 0. How to use this document
 
@@ -689,14 +689,31 @@ After this phase the user can run tanki on their real profile.
 
 Read first: R7 §0–§3, §6; R6 §1–§6; R9 §8.
 
-Streams:
+Streams (contracts, ownership and stream results: `docs/implementation/phase-3-interfaces.md`):
 
-- **Notes** (`tanki-core`, `tanki-tui`): add screen per 8.4; edit current; tags with completion; field checks; sticky fields; history.
-- **Editors** (`tanki-tui`, `tanki-cli`): note file format (parser, writer, round-trip tests); `$EDITOR` flow with changed-fields-only write-back; raw-HTML field editor with live preview; editor commands; media attach (path, pasted path, clipboard image, URL).
-- **Browser** (`tanki-core`, `tanki-tui`): search bar with completion; virtualised table with lazy rows and column chooser; cards/notes modes; sidebar tree; preview pane; bulk actions from 8.7; find and replace with explicit ids.
-- **CLI**: `tanki add`, `tanki edit`, `tanki search`.
+- **Notes** (`tanki-core`, `tanki-tui`):
+  - [x] Add screen per 8.4: defaults, note type/deck pickers with field carry-over, field checks inline, sticky fields (persisted, no full sync), 15-entry session history, discard prompt, IO refused. (`notes_ops.rs`, `add_ui`.)
+  - [x] Edit current note (reviewer `e`): changed fields only, conflict prompt with reload.
+  - [x] Tags with completion (shared `completion.rs`, `CompleteTag`).
+- **Editors** (`tanki-core`, `tanki-tui`, `tanki-cli`):
+  - [x] Note file format: parser, writer, planning helper; byte-exact round trip, robust to CRLF, stripped trailing whitespace, BOM. Unwritable values use a per-field `{quoted}` JSON-lines form instead of R7 §6.4's fence.
+  - [x] `$EDITOR` flow (`editor_flow`), changed-fields-only, all-or-nothing write-back in one undo step (`writeback.rs`); reopen with errors; edited file kept on conflict.
+  - [x] Raw-HTML field editor (own `textarea.rs`; no ratatui-textarea) with live preview (`RenderUncommittedCard`).
+  - [x] Editor commands: bold/italic/underline, colour (`<span style="color: rgb(…)">`, as desktop stores it), lists, cloze new/same number from Anki's cloze-number set, MathJax inline/block/chemistry.
+  - [x] Media attach: path prompt with completion, pasted/dropped path, clipboard image via `wl-paste`/`xclip` (no arboard), URL via `retrieve_url`. Audio recording is not done.
+- **Browser** (`tanki-core`, `tanki-tui`):
+  - [x] Search bar with term/deck/tag/note-type completion and history (saved in tanki's config).
+  - [x] Virtualised table (visible rows ± 20 fetched, cached; tested on 50k ids), column chooser (no reordering yet), sort by built-in columns only, cards/notes modes, row colours; settings under desktop's keys.
+  - [x] Sidebar tree in `SidebarStage` order, with replace/AND/OR/negate keys, collapse state under desktop's keys, saved searches; desktop's default search text.
+  - [x] Preview pane (text tier; no images yet).
+  - [x] Bulk actions from 8.7 (change deck, tags, clear unused tags, mark, flag, suspend, bury, forget, set due, reposition, grade now, delete, select all/invert); find and replace with explicit ids (empty refused before Anki is called). Not done here: find duplicates, change note type (Phase 5 guard), export selection, card info and filtered deck from search (both "not available yet (Phase 5)").
+- **CLI**:
+  - [x] `tanki add` (flags, `--file`/stdin, `--edit`), `tanki edit` (`$EDITOR` or `--file`; exit 26 on conflict), `tanki search` (`--format table|json|ids`, built-in sort), `tanki delete` (`--yes`).
 
 Exit test: byte-identical round-trip test over a corpus of field HTML (stock editor output shapes from R7 §2 plus adversarial cases); add → search → edit → delete scripted through the CLI on a fixture.
+
+- [x] Automated exit: `tanki-core/tests/notefile_phase3.rs::every_corpus_value_round_trips_byte_for_byte` (83-case corpus in `tests/fixtures/field-corpus/corpus.json`, also after editor manglings) and `tanki-cli/tests/notes_cli.rs::exit_add_search_edit_delete` pass, with the full workspace build, tests and strict clippy.
+- [ ] Manual: the user checks the add screen, browser and `$EDITOR` hand-over in a real terminal (checklist in the Phase 3 results).
 
 ### Phase 4 — rich rendering (L)
 
