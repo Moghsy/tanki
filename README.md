@@ -1,12 +1,37 @@
 # tanki
 
-A terminal Anki client in Rust. Phase 1's study MVP and fixture acceptance checks are complete. Development still uses temporary fixture profiles until Phase 2's data-safety checks pass.
+A terminal Anki client in Rust. It studies, syncs (with a self-hosted server only), imports, exports and backs up your existing Anki profile in place. Adding, editing and browsing notes come in later phases.
 
 Licensed under AGPL-3.0-or-later.
 
 tanki is an unofficial, Anki-compatible client. It is not affiliated with or endorsed by Ankitects. Anki is a trademark of Ankitects Pty Ltd.
 
-Development uses synthetic collections only. Never point development commands at your real Anki profile. See [the implementation plan](docs/PLAN.md).
+See [the implementation plan](docs/PLAN.md). Development and tests use synthetic collections only.
+
+## Using your Anki profile
+
+tanki finds profiles where Anki desktop does: `--base`, then `ANKI_BASE`, then `$XDG_DATA_HOME/Anki2`, then `~/.local/share/Anki2`. A profile is chosen with `--profile NAME`, else the last one used, else the only one. tanki never reads `prefs21.db` and never touches `addons21/`.
+
+- **Close Anki desktop first.** tanki refuses to open a profile that another program has open (exit 20), and refuses when `collection.anki2-wal` exists, which means desktop is running or crashed (exit 25). If you are sure Anki is closed, retry with `--confirm-closed`.
+- The first time tanki opens a collection it makes a backup in the profile's `backups/` folder; afterwards it follows Anki's backup schedule and retention. `tanki backup list|create|restore FILE` manages them. Restore replaces the whole collection (a backup is taken first).
+- `tanki import deck.apkg`, `tanki export out.apkg [--deck D | --query Q]`, `tanki export all.colpkg`.
+- Imports that would force a one-way full sync ask for `--confirm-full-sync` (exit 24).
+- Desktop 25.09.4 and tanki (Anki 26.09.4 core) can share a profile; see the notes in `docs/implementation/spike-d-version-skew.md`.
+
+## Sync (self-hosted only)
+
+AnkiWeb's terms exclude third-party clients, so tanki refuses AnkiWeb and syncs only with a server you run. `tanki sync-server --data DIR --users-file FILE` runs Anki's own sync server; see [docs/sync-server.md](docs/sync-server.md).
+
+```sh
+tanki sync login --url https://your-server:8080/
+tanki sync            # --upload / --download when a one-way full sync must be chosen (exit 21)
+tanki sync status
+tanki sync auto on    # sync when the TUI opens and closes
+```
+
+If the collection synced with another server before (for example AnkiWeb), the first sync with yours is a one-way full sync, and every other device must then use your server too.
+
+## Development
 
 Prerequisites: Rust 1.97.1, a C compiler, protoc (31.1 recommended), and the ALSA development headers plus pkg-config on Linux (`libasound2-dev` and `pkg-config` on Debian/Ubuntu). Install these explicitly; setup does not download executable tools.
 

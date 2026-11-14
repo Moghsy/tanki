@@ -279,25 +279,6 @@ fn media_sync(col: &mut Collection, auth: &SyncCredentials) -> Result<()> {
 // ---------------------------------------------------------------------------
 // Server
 
-/// Every place a real Anki base can live (R5 §1.1), as in `safety.rs`.
-fn real_bases() -> Vec<PathBuf> {
-    let var = |name: &str| {
-        std::env::var_os(name)
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-    };
-    let mut bases = Vec::new();
-    if let Some(home) = var("HOME") {
-        bases.push(home.join(".local/share/Anki2"));
-        bases.push(home.join(".var/app/net.ankiweb.Anki/data/Anki2"));
-    }
-    if let Some(data) = var("XDG_DATA_HOME") {
-        bases.push(data.join("Anki2"));
-    }
-    bases.extend(var("ANKI_BASE"));
-    bases
-}
-
 /// Entries that mark an Anki profile or base folder.
 const PROFILE_MARKERS: [&str; 5] = [
     "collection.anki2",
@@ -329,7 +310,7 @@ pub fn check_server_data_folder(path: &Path) -> Result<PathBuf> {
     {
         return refuse("it must not contain '..'");
     }
-    let bases = real_bases();
+    let bases = crate::safety::real_bases();
     // Lexical check first, before any filesystem access.
     if bases.iter().any(|base| absolute.starts_with(base)) {
         return refuse("it is inside a real Anki data folder");

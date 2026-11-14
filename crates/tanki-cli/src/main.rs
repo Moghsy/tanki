@@ -16,11 +16,13 @@ const DISCLAIMER: &str = "tanki is an unofficial, Anki-compatible client. It is 
 #[derive(Parser)]
 #[command(name = "tanki", version, long_version = concat!(env!("CARGO_PKG_VERSION"), "\n", "tanki is an unofficial, Anki-compatible client. It is not affiliated with or endorsed by Ankitects. Anki is a trademark of Ankitects Pty Ltd."), after_help = DISCLAIMER)]
 struct Args {
-    /// Existing temporary base directory containing generated fixture profiles.
+    /// Anki base folder holding the profiles [default: $ANKI_BASE, then
+    /// $XDG_DATA_HOME/Anki2, then ~/.local/share/Anki2, as desktop uses].
     #[arg(long, global = true)]
     base: Option<PathBuf>,
-    #[arg(long, global = true, default_value = "tanki-fixture")]
-    profile: String,
+    /// Profile folder name [default: the last one used, or the only one].
+    #[arg(long, global = true)]
+    profile: Option<String>,
     #[arg(long, global = true, value_enum, default_value = "auto")]
     graphics: GraphicsArg,
     /// Print machine-readable output for commands such as decks.
@@ -85,20 +87,76 @@ enum CliCommand {
 }
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-fn profile_path(args: &Args) -> Result<PathBuf> {
-    let base = args
-        .base
-        .as_ref()
-        .ok_or("Fixture commands require explicit --base during development")?;
-    let base = tanki_core::validate_profile(base)?;
-    if args.profile.is_empty()
-        || args.profile == "."
-        || args.profile == ".."
-        || args.profile.contains(['/', '\\'])
-    {
-        return Err("--profile must be a single folder name".into());
+/// Desktop's resolution order (R5 §1.1): `--base`, `ANKI_BASE`, then
+/// `$XDG_DATA_HOME/Anki2`, falling back to `~/.local/share/Anki2`.
+fn base_dir(args: &Args) -> Result<PathBuf> {
+    let var = |name: &str| {
+        std::env::var_os(name)
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+    };
+    args.base
+        .clone()
+        .or_else(|| var("ANKI_BASE"))
+        .or_else(|| var("XDG_DATA_HOME").map(|d| d.join("Anki2")))
+        .or_else(|| var("HOME").map(|h| h.join(".local/share/Anki2")))
+        .ok_or_else(|| "No Anki base folder: pass --base or set ANKI_BASE".into())
+}
+
+/// Profiles are the base's subfolders holding a `collection.anki2`;
+/// desktop's `prefs21.db` is never read (PLAN 4.4).
+fn profiles(base: &Path) -> Result<Vec<String>> {
+    let mut names = Vec::new();
+    for entry in std::fs::read_dir(base)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == "addons21" || name.starts_with('.') || !entry.file_type()?.is_dir() {
+            continue;
+        }
+        if entry.path().join("collection.anki2").is_file() {
+            names.push(name);
+        }
     }
-    Ok(base.join(&args.profile))
+    names.sort();
+    Ok(names)
+}
+
+fn valid_profile_name(name: &str) -> bool {
+    !(name.is_empty()
+        || name == "."
+        || name == ".."
+        || name == "addons21"
+        || name.contains(['/', '\\']))
+}
+
+/// `--profile`, then the last profile used (if it is still there), then the
+/// only profile in the base; otherwise an error listing them.
+fn profile_path(args: &Args) -> Result<PathBuf> {
+    let base = base_dir(args)?;
+    let base = tanki_core::validate_profile(&base)
+        .map_err(|e| format!("Anki base folder {}: {e}", base.display()))?;
+    if let Some(name) = &args.profile {
+        if !valid_profile_name(name) {
+            return Err("--profile must be a single folder name".into());
+        }
+        return Ok(base.join(name));
+    }
+    let found = profiles(&base)?;
+    let last = config_path(args)
+        .and_then(|file| tanki_core::config::Config::load(&file).ok())
+        .and_then(|config| config.last_profile)
+        .filter(|name| found.contains(name));
+    match (last, found.as_slice()) {
+        (Some(name), _) => Ok(base.join(name)),
+        (None, [only]) => Ok(base.join(only)),
+        (None, []) => Err(format!("No Anki profiles in {}", base.display()).into()),
+        (None, many) => Err(format!(
+            "Several profiles in {}: {}. Choose one with --profile NAME.",
+            base.display(),
+            many.join(", ")
+        )
+        .into()),
+    }
 }
 
 /// Always call close, even when the operation failed: close joins the exit backup.
@@ -130,7 +188,10 @@ fn with_collection<T>(
         },
     )?;
     if let (Some(file), Some(loaded)) = (&config, loaded.as_mut()) {
-        if loaded.mark_seen(&collection) {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+        let profile_changed = loaded.last_profile != name;
+        loaded.last_profile = name;
+        if loaded.mark_seen(&collection) || profile_changed {
             if let Err(error) = loaded.save(file) {
                 eprintln!(
                     "tanki: could not record the collection in {}: {error}",
@@ -276,6 +337,10 @@ fn run(args: Args) -> Result<()> {
             })?;
         }
         Some(CliCommand::FixtureDump) => {
+            // A development harness: never resolves a default (real) base.
+            if args.base.is_none() {
+                return Err("fixture-dump requires an explicit --base".into());
+            }
             with_collection(&profile_path(&args)?, &args, |actor| {
                 let Response::CardIds(ids) = actor.execute(Command::Search {
                     query: String::new(),

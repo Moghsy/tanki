@@ -13,6 +13,11 @@ fn main() -> Result<()> {
             let study = command == "study-fixtures";
             let base = Path::new(base);
             let checked = tanki_core::validate_profile(base)?;
+            // Fixtures are written only under the system temp folder, never
+            // into a real Anki base (PLAN 14.1).
+            if !checked.starts_with(std::env::temp_dir().canonicalize()?) {
+                return Err("fixtures --base must be inside the system temp folder".into());
+            }
             let profile = checked.join("tanki-fixture");
             std::fs::create_dir(&profile)?;
             let actor = tanki_core::CollectionActor::open(&profile)?;

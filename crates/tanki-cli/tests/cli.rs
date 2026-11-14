@@ -9,21 +9,12 @@ fn version_has_unofficial_disclaimer() {
         .contains("not affiliated with or endorsed by Ankitects"));
 }
 #[test]
-fn fixture_dump_requires_explicit_safe_base() {
+fn fixture_dump_requires_explicit_base() {
     let missing = tanki().arg("fixture-dump").output().unwrap();
     assert!(!missing.status.success());
     assert!(String::from_utf8(missing.stderr)
         .unwrap()
         .contains("explicit --base"));
-    let denied = tanki()
-        .args(["--base", env!("CARGO_MANIFEST_DIR"), "fixture-dump"])
-        .env_remove("TANKI_ALLOW_REAL_PROFILE")
-        .output()
-        .unwrap();
-    assert!(!denied.status.success());
-    assert!(String::from_utf8(denied.stderr)
-        .unwrap()
-        .contains("temporary or fixture"));
 }
 
 #[test]
@@ -44,70 +35,111 @@ fn fixture_dump(base: &std::path::Path) -> Command {
     command
         .arg("--base")
         .arg(base)
-        .arg("fixture-dump")
-        .env_remove("TANKI_ALLOW_REAL_PROFILE")
-        .env_remove("ANKI_BASE")
-        .env_remove("XDG_DATA_HOME");
+        .args(["--profile", "tanki-fixture", "fixture-dump"]);
     command
 }
 
+/// The development guard is gone (Phase 2 exit): a base outside the temp
+/// folder opens without any environment variable.
 #[test]
-fn guard_allows_non_temp_base_only_with_env() {
-    // target/tmp is outside the system temp folder, so the guard applies.
+fn non_temp_base_opens_without_the_old_guard() {
     let base = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
-    let denied = fixture_dump(base.path()).output().unwrap();
-    assert!(!denied.status.success());
-    assert!(String::from_utf8(denied.stderr)
-        .unwrap()
-        .contains("temporary or fixture"));
-    assert!(std::fs::read_dir(base.path()).unwrap().next().is_none());
     std::fs::create_dir(base.path().join("tanki-fixture")).unwrap();
-    let allowed = fixture_dump(base.path())
-        .env("TANKI_ALLOW_REAL_PROFILE", "1")
-        .output()
-        .unwrap();
+    let output = fixture_dump(base.path()).output().unwrap();
     assert!(
-        allowed.status.success(),
+        output.status.success(),
         "{}",
-        String::from_utf8_lossy(&allowed.stderr)
+        String::from_utf8_lossy(&output.stderr)
     );
     assert!(base.path().join("tanki-fixture/collection.anki2").exists());
 }
 
+/// PLAN 4.5 / R5 §1.1, inside a fake HOME (the real one is never named):
+/// `--base`, then `ANKI_BASE`, then `$XDG_DATA_HOME/Anki2`, then
+/// `~/.local/share/Anki2`; profiles are folders with a collection; desktop's
+/// `prefs21.db` is left alone; the last profile used is remembered.
 #[test]
-fn real_anki_bases_are_refused_even_with_env() {
-    // A fake HOME inside a temp folder stands in for the real one; the real
-    // profile is never named or touched.
+fn base_and_profile_resolution_like_desktop() {
     let root = tempfile::tempdir().unwrap();
     let home = root.path().join("home");
-    let cases = [
-        (home.join(".local/share/Anki2"), None),
-        (home.join(".var/app/net.ankiweb.Anki/data/Anki2"), None),
-        (
-            root.path().join("xdg/Anki2"),
-            Some(("XDG_DATA_HOME", root.path().join("xdg"))),
-        ),
-        (
-            root.path().join("custom"),
-            Some(("ANKI_BASE", root.path().join("custom"))),
-        ),
-    ];
-    for (base, env) in cases {
-        std::fs::create_dir_all(&base).unwrap();
-        let mut command = fixture_dump(&base);
-        command
-            .env("HOME", &home)
-            .env("TANKI_ALLOW_REAL_PROFILE", "1");
-        if let Some((name, value)) = env {
+    let default_base = home.join(".local/share/Anki2");
+    let make_profile = |base: &std::path::Path, name: &str| {
+        let profile = base.join(name);
+        std::fs::create_dir_all(&profile).unwrap();
+        tanki_core::CollectionActor::open(&profile)
+            .unwrap()
+            .close()
+            .unwrap();
+    };
+    make_profile(&default_base, "User 1");
+    let prefs = default_base.join("prefs21.db");
+    std::fs::write(&prefs, b"desktop's pickles").unwrap();
+    std::fs::create_dir_all(default_base.join("addons21/some-addon")).unwrap();
+    let config = root.path().join("config.toml");
+    let run = |envs: &[(&str, &std::path::Path)], extra: &[&str]| {
+        let mut command = tanki();
+        command.env("HOME", &home).arg("--config").arg(&config);
+        for (name, value) in envs {
             command.env(name, value);
         }
-        let output = command.output().unwrap();
-        assert!(!output.status.success(), "{}", base.display());
-        assert!(String::from_utf8(output.stderr)
+        command
+            .args(extra)
+            .arg("--json")
+            .arg("decks")
+            .output()
             .unwrap()
-            .contains("real Anki base"));
-        assert!(std::fs::read_dir(&base).unwrap().next().is_none());
+    };
+    // Default base, single profile.
+    let output = run(&[], &[]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(default_base
+        .join("User 1/backups")
+        .read_dir()
+        .unwrap()
+        .next()
+        .is_some());
+    assert_eq!(std::fs::read(&prefs).unwrap(), b"desktop's pickles");
+    // XDG_DATA_HOME wins over the fallback; ANKI_BASE over both.
+    let xdg = root.path().join("xdg");
+    let custom = root.path().join("custom");
+    let output = run(&[("XDG_DATA_HOME", &xdg)], &[]);
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains(&xdg.join("Anki2").display().to_string())
+    );
+    make_profile(&custom, "Only");
+    let output = run(&[("XDG_DATA_HOME", &xdg), ("ANKI_BASE", &custom)], &[]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // Several profiles: the last one used is chosen, else the user must pick.
+    // ("Only" from the custom base is not in the default base, so it is not used.)
+    assert!(run(&[], &[]).status.success());
+    make_profile(&default_base, "User 2");
+    let output = run(&[], &[]);
+    assert!(output.status.success(), "last used profile (User 1)");
+    std::fs::write(&config, "").unwrap();
+    let output = run(&[], &[]);
+    assert!(!output.status.success());
+    let message = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        message.contains("User 1, User 2") && message.contains("--profile"),
+        "{message}"
+    );
+    let output = run(&[], &["--profile", "User 2"]);
+    assert!(output.status.success());
+    assert!(std::fs::read_to_string(&config).unwrap().contains("User 2"));
+    let output = run(&[], &[]);
+    assert!(output.status.success(), "remembers User 2");
+    for bad in ["addons21", "..", "a/b"] {
+        assert!(!run(&[], &["--profile", bad]).status.success(), "{bad}");
     }
+    assert_eq!(std::fs::read(&prefs).unwrap(), b"desktop's pickles");
 }
 
 #[test]
@@ -140,9 +172,7 @@ fn fixture_command(base: &std::path::Path) -> Command {
     command
         .arg("--base")
         .arg(base)
-        .env_remove("TANKI_ALLOW_REAL_PROFILE")
-        .env_remove("ANKI_BASE")
-        .env_remove("XDG_DATA_HOME");
+        .args(["--profile", "tanki-fixture"]);
     command
 }
 
@@ -209,13 +239,15 @@ fn review_non_tty_and_missing_deck_errors_still_close_and_backup() {
 }
 
 #[test]
-fn study_commands_require_safe_base_and_profile_names() {
+fn study_commands_require_existing_base_and_safe_profile_names() {
     for command in ["review", "decks"] {
+        // No base given: the fake HOME's default base does not exist.
         let missing = tanki().arg(command).output().unwrap();
         assert!(!missing.status.success());
-        assert!(String::from_utf8_lossy(&missing.stderr).contains("explicit --base"));
         let base = tempfile::tempdir().unwrap();
-        let invalid = fixture_command(base.path())
+        let invalid = tanki()
+            .arg("--base")
+            .arg(base.path())
             .args(["--profile", "../escape", command])
             .output()
             .unwrap();
@@ -266,11 +298,15 @@ fn leftover_wal_exits_25_until_confirmed_closed() {
 /// The binary under test, with its config folder kept out of the user's
 /// home (it records every collection it opens).
 fn tanki() -> Command {
+    // A fake HOME and no ANKI_BASE / XDG_DATA_HOME: with the development guard
+    // gone, a test that forgets --base must still never reach a real base.
+    let scratch = std::env::temp_dir().join(format!("tanki-cli-test-{}", std::process::id()));
     let mut command = Command::new(env!("CARGO_BIN_EXE_tanki"));
-    command.env(
-        "XDG_CONFIG_HOME",
-        std::env::temp_dir().join(format!("tanki-cli-test-config-{}", std::process::id())),
-    );
+    command
+        .env("HOME", scratch.join("home"))
+        .env("XDG_CONFIG_HOME", scratch.join("config"))
+        .env_remove("ANKI_BASE")
+        .env_remove("XDG_DATA_HOME");
     command
 }
 

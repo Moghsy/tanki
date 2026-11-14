@@ -5,10 +5,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// Every place a real Anki base can live on this machine (R5 §1.1). These are
-/// refused during development even when `TANKI_ALLOW_REAL_PROFILE=1` is set;
-/// both checks go away at Phase 2 exit (PLAN section 14 rule 2).
-fn real_bases() -> Vec<PathBuf> {
+/// Every place a real Anki base can live on this machine (R5 §1.1). Used to
+/// keep things that must never be inside a profile (the sync server's data
+/// folder) out of them.
+pub(crate) fn real_bases() -> Vec<PathBuf> {
     let var = |name: &str| {
         std::env::var_os(name)
             .filter(|value| !value.is_empty())
@@ -26,23 +26,29 @@ fn real_bases() -> Vec<PathBuf> {
     bases
 }
 
+/// Desktop's preferences and add-ons are never tanki's to touch (PLAN 14.3).
 fn forbidden(path: &Path) -> bool {
-    real_bases().iter().any(|base| path.starts_with(base))
-        || path
-            .components()
-            .any(|c| c.as_os_str() == "prefs21.db" || c.as_os_str() == "addons21")
+    path.components()
+        .any(|c| c.as_os_str() == "prefs21.db" || c.as_os_str() == "addons21")
 }
 
+/// Checks a profile folder before anything opens it and returns its
+/// canonical path. The folder must exist; `..`, desktop's preferences and
+/// add-on folders, and symlinked collection files are refused.
+///
+/// Until Phase 2 this also refused real Anki bases unless
+/// `TANKI_ALLOW_REAL_PROFILE=1`; that guard was removed at the Phase 2 exit
+/// (PLAN 11). The in-use checks, schema peek and first-open backup protect
+/// real profiles now.
 pub fn validate_profile(path: &Path) -> Result<PathBuf> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
         std::env::current_dir()?.join(path)
     };
-    // Reject known real profile paths before any filesystem access.
     if forbidden(&absolute) {
         return Err(CoreError::UnsafePath(
-            "Development may not access the real Anki base.".into(),
+            "tanki never opens Anki desktop's prefs21.db or addons21.".into(),
         ));
     }
     if absolute
@@ -55,29 +61,12 @@ pub fn validate_profile(path: &Path) -> Result<PathBuf> {
     }
     // Require an existing directory so canonicalization cannot overlook symlink ancestors.
     let canonical = absolute.canonicalize()?;
-    // Compare again with symlinks in the bases' parents resolved. Only the
-    // parent is resolved, so nothing inside a real base is ever touched.
-    let resolved_bases = real_bases()
-        .into_iter()
-        .filter_map(|base| Some(base.parent()?.canonicalize().ok()?.join(base.file_name()?)));
-    if forbidden(&canonical) || resolved_bases.into_iter().any(|b| canonical.starts_with(b)) {
+    if forbidden(&canonical) {
         return Err(CoreError::UnsafePath(
-            "Profile resolves to a forbidden Anki path.".into(),
+            "Profile resolves to Anki desktop's prefs21.db or addons21.".into(),
         ));
     }
-    let temp = std::env::temp_dir().canonicalize()?;
-    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/fixtures")
-        .canonicalize()
-        .ok();
-    let allowed =
-        canonical.starts_with(&temp) || fixtures.is_some_and(|p| canonical.starts_with(p));
-    if !allowed && std::env::var("TANKI_ALLOW_REAL_PROFILE").as_deref() != Ok("1") {
-        return Err(CoreError::UnsafePath(
-            "Until Phase 2, use a temporary or fixture profile (--base).".into(),
-        ));
-    }
-    // Collection and media symlinks could escape an otherwise safe base.
+    // Collection and media symlinks could point outside the profile.
     for name in [
         "collection.anki2",
         "collection.anki2-wal",
