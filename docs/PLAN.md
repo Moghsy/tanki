@@ -1,6 +1,6 @@
 # tanki — plan for a terminal Anki client
 
-Status: **Phase 1 complete (2026-11-13). Phase 2 complete (2026-11-14); see below. All Phase 1 streams are integrated; the lead's full build/tests/clippy and exact Python study replay pass. The user confirmed fixture images, audio and terminal restoration. Results are in section 13 and `docs/implementation/phase-1-results.md`. Phase 2 (sync and data safety) is complete (2026-11-14): its automated exit test passes, the real-profile guard is removed, and the user confirmed the desktop-running checks on the real profile and the TUI data screens on a fixture; results are in section 13 and `docs/implementation/phase-2-interfaces.md`. Phase 3 (add, edit, browse) is implemented and its automated exit test passes (2026-11-14); the user's terminal check is pending. The pin moved to the 26.09.4 release tag during Phase 0 (4.1).** Written 2026-11-12 against the Anki checkout at `../anki` (`main` at `4aa9c0836`, 2026-08-30, just past the 26.08.1 tag).
+Status: **Phase 1 complete (2026-11-13). Phase 2 complete (2026-11-14); see below. All Phase 1 streams are integrated; the lead's full build/tests/clippy and exact Python study replay pass. The user confirmed fixture images, audio and terminal restoration. Results are in section 13 and `docs/implementation/phase-1-results.md`. Phase 2 (sync and data safety) is complete (2026-11-14): its automated exit test passes, the real-profile guard is removed, and the user confirmed the desktop-running checks on the real profile and the TUI data screens on a fixture; results are in section 13 and `docs/implementation/phase-2-interfaces.md`. Phase 3 (add, edit, browse) is complete (2026-11-14): its automated exit test passes and the user confirmed the add screen, browser and `$EDITOR` hand-over in their terminal; results are in `docs/implementation/phase-3-interfaces.md`. The pin moved to the 26.09.4 release tag during Phase 0 (4.1).** Written 2026-11-12 against the Anki checkout at `../anki` (`main` at `4aa9c0836`, 2026-08-30, just past the 26.08.1 tag).
 
 ## 0. How to use this document
 
@@ -713,7 +713,7 @@ Streams (contracts, ownership and stream results: `docs/implementation/phase-3-i
 Exit test: byte-identical round-trip test over a corpus of field HTML (stock editor output shapes from R7 §2 plus adversarial cases); add → search → edit → delete scripted through the CLI on a fixture.
 
 - [x] Automated exit: `tanki-core/tests/notefile_phase3.rs::every_corpus_value_round_trips_byte_for_byte` (83-case corpus in `tests/fixtures/field-corpus/corpus.json`, also after editor manglings) and `tanki-cli/tests/notes_cli.rs::exit_add_search_edit_delete` pass, with the full workspace build, tests and strict clippy.
-- [ ] Manual: the user checks the add screen, browser and `$EDITOR` hand-over in a real terminal (checklist in the Phase 3 results).
+- [x] Manual: the user ran the checklist (add screen, `$EDITOR` hand-over, browser, edit current in review) on a fixture in their terminal and reported that it worked (2026-11-14; reported as a whole, not step by step; terminal name not supplied).
 
 ### Phase 4 — rich rendering (L)
 
