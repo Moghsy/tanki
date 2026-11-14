@@ -195,7 +195,7 @@ pub(crate) fn execute(col: &mut Collection, command: BrowseCommand) -> Result<Ed
             .val,
         ),
         BrowseCommand::SetDueDate { card_ids, days } => {
-            R::Changes(changes(SchedulerService::set_due_date(
+            let result = SchedulerService::set_due_date(
                 col,
                 pb::scheduler::SetDueDateRequest {
                     card_ids,
@@ -204,7 +204,12 @@ pub(crate) fn execute(col: &mut Collection, command: BrowseCommand) -> Result<Ed
                         key: StringKey::SetDueBrowser as i32,
                     }),
                 },
-            )?))
+            );
+            // A malformed `days` is invalid input; keep Anki's message.
+            R::Changes(changes(result.map_err(|error| match error {
+                AnkiError::InvalidInput { .. } => CoreError::Invalid(error.message(col.tr())),
+                other => other.into(),
+            })?))
         }
         BrowseCommand::GradeNow { card_ids, rating } => {
             use pb::scheduler::card_answer::Rating as R2;
