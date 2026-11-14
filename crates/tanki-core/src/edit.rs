@@ -316,6 +316,11 @@ pub struct BrowserSettings {
     pub card_sort_reverse: bool,
     pub note_sort: String,
     pub note_sort_reverse: bool,
+    /// `DefaultSearchText` (desktop's Preferences > Browsing): the search
+    /// the browser opens with; empty means `deck:current`. Read only:
+    /// `SetSettings` does not write it.
+    #[serde(default)]
+    pub default_search: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -340,6 +345,11 @@ pub struct SidebarData {
     pub notetypes: Vec<NotetypeInfo>,
     /// Labels of flags 1-7 (custom or Anki's defaults).
     pub flag_names: Vec<String>,
+    /// Collapse state of the sections, in desktop's order (`SidebarStage`):
+    /// Saved Searches, Today, Flags, Card State, Decks, Note Types, Tags.
+    /// Kept under desktop's `COLLAPSE_*` bool config keys.
+    #[serde(default)]
+    pub section_collapsed: [bool; 7],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -418,6 +428,9 @@ pub enum BrowseCommand {
     SetDeckCollapsed { deck_id: i64, collapsed: bool },
     /// -> `Changes`.
     SetTagCollapsed { name: String, collapsed: bool },
+    /// A sidebar section (index into `SidebarData::section_collapsed`),
+    /// stored under desktop's `COLLAPSE_*` key -> `Changes`.
+    SetSectionCollapsed { section: u8, collapsed: bool },
     /// Replaces the whole `savedFilters` map -> `Changes`.
     SetSavedSearches { searches: Vec<(String, String)> },
     /// All cards of these notes -> `Ids`.

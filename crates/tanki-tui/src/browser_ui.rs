@@ -86,7 +86,8 @@ pub struct BrowserOptions {
     pub night_mode: bool,
     /// `ProfileConfig::search_history`, newest first.
     pub history: Vec<String>,
-    /// The initial search; `deck:current` when `None` (desktop's default).
+    /// The initial search; when `None`, the collection's default search
+    /// text (`BrowserSettings::default_search`), else `deck:current`.
     pub search: Option<String>,
 }
 
@@ -371,7 +372,16 @@ impl BrowserUi {
             message: None,
         };
         ui.reload_sidebar(backend)?;
-        let initial = options.search.unwrap_or_else(|| "deck:current".into());
+        // Desktop's `_default_search`: the configured default search text,
+        // else the current deck.
+        let initial = options.search.unwrap_or_else(|| {
+            let default = ui.settings.default_search.trim();
+            if default.is_empty() {
+                "deck:current".into()
+            } else {
+                default.to_owned()
+            }
+        });
         ui.search = TextInput::new(initial.clone());
         match browse_text(backend, BrowseCommand::NormalizeSearch { query: initial }) {
             Ok(query) => {
@@ -481,6 +491,10 @@ impl BrowserUi {
         let EditResponse::Sidebar(data) = browse(backend, BrowseCommand::Sidebar)? else {
             return Err(CoreError::Other("Unexpected answer to Sidebar".into()));
         };
+        self.sidebar_local.collapsed_sections = sidebar::Section::ALL
+            .into_iter()
+            .filter(|s| data.section_collapsed[s.index() as usize])
+            .collect();
         self.sidebar_data = data;
         let mut decks = Vec::new();
         sidebar::deck_names(&self.sidebar_data.decks, &mut decks);
@@ -1749,10 +1763,22 @@ impl BrowserUi {
     fn set_collapsed(&mut self, backend: &dyn Backend, row: &sidebar::Row, collapsed: bool) {
         match &row.kind {
             ItemKind::Section(section) => {
+                // Shown at once; stored under desktop's `COLLAPSE_*` key.
                 if collapsed {
                     self.sidebar_local.collapsed_sections.insert(*section);
                 } else {
                     self.sidebar_local.collapsed_sections.remove(section);
+                }
+                let index = section.index();
+                self.sidebar_data.section_collapsed[index as usize] = collapsed;
+                if let Err(error) = browse(
+                    backend,
+                    BrowseCommand::SetSectionCollapsed {
+                        section: index,
+                        collapsed,
+                    },
+                ) {
+                    self.message = Some(error.to_string());
                 }
             }
             ItemKind::Notetype(id) => {
