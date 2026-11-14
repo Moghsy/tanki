@@ -44,13 +44,44 @@ impl SyncEndpoint {
         self.0.as_str()
     }
 
-    #[cfg(test)]
-    pub(super) fn auth(&self, hkey: String) -> anki::sync::login::SyncAuth {
+    /// The auth Anki's sync calls take. `sync_login` returns one without an
+    /// endpoint, which Anki treats as AnkiWeb, so every auth is built here.
+    pub(crate) fn auth_with_timeout(
+        &self,
+        hkey: String,
+        timeout_secs: u32,
+    ) -> anki::sync::login::SyncAuth {
         anki::sync::login::SyncAuth {
             hkey,
             endpoint: Some(self.0.clone()),
-            io_timeout_secs: Some(5),
+            io_timeout_secs: (timeout_secs > 0).then_some(timeout_secs),
         }
+    }
+
+    /// Phase 0 spike form, with a short timeout.
+    #[cfg(test)]
+    pub(super) fn auth(&self, hkey: String) -> anki::sync::login::SyncAuth {
+        self.auth_with_timeout(hkey, 5)
+    }
+}
+
+/// True for `ankiweb.net` and its subdomains (any case, trailing dot).
+pub(crate) fn is_ankiweb_host(host: &str) -> bool {
+    forbidden_host(host)
+}
+
+/// A sync HTTP client plus a record of whether its resolver refused an
+/// AnkiWeb name, so a refused redirect can be reported clearly.
+pub(crate) struct SafeClient {
+    pub client: reqwest::Client,
+    refused: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl SafeClient {
+    /// Whether any request made with this client was stopped because it
+    /// named an AnkiWeb host (for example after a protocol redirect).
+    pub fn refused_ankiweb(&self) -> bool {
+        self.refused.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
@@ -58,23 +89,32 @@ impl SyncEndpoint {
 // so reqwest's redirect policy and the check in `SyncEndpoint::parse` do not
 // cover a server that redirects elsewhere. Refusing to resolve AnkiWeb's names
 // does, and proxies are disabled so that none can resolve them instead.
-#[cfg(test)]
-pub(super) fn client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
+pub(crate) fn safe_client() -> Result<SafeClient> {
+    let refused = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let client = reqwest::Client::builder()
         .http1_only()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
-        .dns_resolver(std::sync::Arc::new(SelfHostedResolver))
+        .dns_resolver(std::sync::Arc::new(SelfHostedResolver {
+            refused: refused.clone(),
+        }))
         .build()
-        .map_err(|e| CoreError::Other(e.to_string()))
+        .map_err(|e| CoreError::Other(e.to_string()))?;
+    Ok(SafeClient { client, refused })
 }
 
+/// Phase 0 spike form.
 #[cfg(test)]
-struct SelfHostedResolver;
+pub(super) fn client() -> Result<reqwest::Client> {
+    Ok(safe_client()?.client)
+}
+
+struct SelfHostedResolver {
+    refused: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
 
 /// Decides before any lookup happens; kept separate so it can be tested
 /// without touching the network.
-#[cfg(test)]
 fn refuse_forbidden(name: &str) -> std::io::Result<()> {
     if forbidden_host(name) {
         return Err(std::io::Error::new(
@@ -85,11 +125,14 @@ fn refuse_forbidden(name: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
 impl reqwest::dns::Resolve for SelfHostedResolver {
     fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let refused = self.refused.clone();
         Box::pin(async move {
-            refuse_forbidden(name.as_str())?;
+            if let Err(error) = refuse_forbidden(name.as_str()) {
+                refused.store(true, std::sync::atomic::Ordering::SeqCst);
+                return Err(error.into());
+            }
             let addresses = tokio::net::lookup_host((name.as_str(), 0)).await?;
             Ok(Box::new(addresses.collect::<Vec<_>>().into_iter()) as reqwest::dns::Addrs)
         })
