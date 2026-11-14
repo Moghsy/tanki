@@ -120,7 +120,9 @@ fn draw_form(ui: &AddUi, area: Rect, buf: &mut Buffer) {
         let cell = &mut buf[(tags_area.x + col, input_y)];
         let style = cell.style().add_modifier(Modifier::REVERSED);
         cell.set_style(style);
-        draw_tag_popup(ui, fields_area, buf);
+        // Above the input when it does not fit below (the usual case).
+        let anchor = Rect::new(tags_area.x, input_y, tags_area.width, 1);
+        ui.tag_completion.render(&form.tags, anchor, area, buf);
     }
 
     // Field check state and status.
@@ -231,40 +233,6 @@ fn draw_fields(ui: &AddUi, area: Rect, buf: &mut Buffer) {
         }
         f.area.render(rect, buf, focused);
         y += h;
-    }
-}
-
-fn draw_tag_popup(ui: &AddUi, fields_area: Rect, buf: &mut Buffer) {
-    let items = &ui.tag_popup.items;
-    if items.is_empty() {
-        return;
-    }
-    let h = items.len().min(6) as u16;
-    let w = (items.iter().map(|i| i.chars().count()).max().unwrap_or(4) as u16 + 4)
-        .min(fields_area.width);
-    let rect = Rect::new(
-        fields_area.x,
-        (fields_area.y + fields_area.height)
-            .saturating_sub(h + 1)
-            .max(fields_area.y),
-        w,
-        h.min(fields_area.height),
-    );
-    Clear.render(rect, buf);
-    for (i, item) in items.iter().take(rect.height as usize).enumerate() {
-        let style = if i == ui.tag_popup.selected {
-            Style::default().add_modifier(Modifier::REVERSED)
-        } else {
-            Style::default()
-        };
-        put(
-            buf,
-            rect.x,
-            rect.y + i as u16,
-            rect.width,
-            &format!(" {item} "),
-            style,
-        );
     }
 }
 

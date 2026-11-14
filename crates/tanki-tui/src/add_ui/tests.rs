@@ -353,7 +353,13 @@ fn add_flow_with_sticky_history_and_checks() {
     // Tags with completion.
     ui.on_key(&b, ctrl('t'));
     typed(&mut ui, &b, "lan");
-    assert_eq!(ui.tag_popup.items, ["lang::es", "language"]);
+    let offered: Vec<&str> = ui
+        .tag_completion
+        .candidates()
+        .iter()
+        .map(|c| c.text.as_str())
+        .collect();
+    assert_eq!(offered, ["lang::es", "language"]);
     ui.on_key(&b, key(KeyCode::Down));
     ui.on_key(&b, key(KeyCode::Enter));
     assert_eq!(ui.tags_text(), "language ");
@@ -803,10 +809,10 @@ fn snapshot_filled_form_with_sticky_and_tags_popup() {
             "Back [sticky]",
             "hello",
             "",
-            " lang::es",
-            " language",
-            "",
-            "Tags",
+            "┌──────────┐",
+            "│lang::es  │",
+            "│language  │",
+            "└──────────┘",
             "lan",
             "",
             "",
@@ -873,4 +879,29 @@ fn hints_follow_the_context() {
     ui.on_key(&b, alt('f'));
     assert!(ui.hints().contains("Tab complete"));
     assert!(KEYS.iter().any(|(k, _)| k.contains("Ctrl+Enter")));
+}
+
+#[test]
+fn tag_completion_uses_the_shared_popup_keys() {
+    let b = Fake::new();
+    let mut ui = new_add(&b);
+    ui.on_key(&b, ctrl('t'));
+    typed(&mut ui, &b, "lan");
+    assert!(ui.tag_completion.is_open());
+    // Tab moves through the candidates instead of leaving the field.
+    ui.on_key(&b, key(KeyCode::Tab));
+    assert_eq!(ui.form.focus, Focus::Tags);
+    assert_eq!(ui.tag_completion.selected().unwrap().text, "language");
+    // Esc only dismisses the popup.
+    ui.on_key(&b, key(KeyCode::Esc));
+    assert!(!ui.tag_completion.is_open());
+    assert!(!ui.has_overlay());
+    // Tab reopens it; Enter accepts and adds a space.
+    ui.on_key(&b, key(KeyCode::Tab));
+    ui.on_key(&b, key(KeyCode::Enter));
+    assert_eq!(ui.tags_text(), "lang::es ");
+    assert!(b.count("CompleteTag") >= 2);
+    // Nothing to complete: Tab goes to the first field.
+    ui.on_key(&b, key(KeyCode::Tab));
+    assert_eq!(ui.form.focus, Focus::Field(0));
 }

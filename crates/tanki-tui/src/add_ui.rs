@@ -23,6 +23,7 @@ mod render;
 mod tests;
 
 use crate::backend::Backend;
+use crate::completion::{self, Candidate, Completion, CompletionOutcome, Proposal};
 use crate::input::TextInput;
 use crate::textarea::TextArea;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -32,7 +33,6 @@ use tanki_core::{
     Command, EditResponse, FieldInfo, FieldsCheck, NoteCommand, NoteData, NoteUpdate, NotetypeInfo,
     NotetypeKind, OpChanges, Response,
 };
-use unicode_width::UnicodeWidthChar;
 
 pub use editor_cmds::{EditorCommand, PALETTE};
 pub use media::{clipboard_image, ClipboardFn};
@@ -314,14 +314,6 @@ struct Status {
     error: bool,
 }
 
-/// Candidate list under the tags input. The seam for the shared completion
-/// popup (`crate::completion`): feed it the word, take the choice.
-#[derive(Default)]
-struct TagPopup {
-    items: Vec<String>,
-    selected: usize,
-}
-
 pub struct AddUi {
     form: Form,
     stash: Option<Form>,
@@ -329,7 +321,8 @@ pub struct AddUi {
     decks: Vec<(i64, String)>,
     history: Vec<HistoryEntry>,
     overlay: Overlay,
-    tag_popup: TagPopup,
+    /// The shared completion popup over the tags input (opens while typing).
+    tag_completion: Completion,
     preview_on: bool,
     preview: Option<Result<tanki_core::RenderedCard, String>>,
     status: Option<Status>,
@@ -390,6 +383,32 @@ fn fetch_note(b: &dyn Backend, id: i64) -> Result<NoteData, String> {
     }
 }
 
+/// Completes the space-separated tag at the cursor with `CompleteTag`.
+fn tag_source(b: &dyn Backend) -> impl FnMut(&str, usize) -> Option<Proposal> + '_ {
+    move |text: &str, cursor: usize| {
+        let range = completion::word_token(text, cursor);
+        let word = &text[range.clone()];
+        if word.is_empty() {
+            return None;
+        }
+        let candidates = match run(
+            b,
+            NoteCommand::CompleteTag {
+                input: word.to_owned(),
+                limit: 8,
+            },
+        ) {
+            Ok(EditResponse::Strings(tags)) => tags
+                .into_iter()
+                .filter(|t| t != word)
+                .map(|t| Candidate::new(t, ""))
+                .collect(),
+            _ => Vec::new(),
+        };
+        Some(Proposal { range, candidates })
+    }
+}
+
 const IO_REFUSED: &str = "Image occlusion notes can't be created or edited in tanki yet";
 
 impl AddUi {
@@ -406,7 +425,7 @@ impl AddUi {
             decks,
             history: Vec::new(),
             overlay: Overlay::None,
-            tag_popup: TagPopup::default(),
+            tag_completion: Completion::new(true),
             preview_on: false,
             preview: None,
             status: None,
@@ -536,8 +555,8 @@ impl AddUi {
     pub fn hints(&self) -> String {
         match &self.overlay {
             Overlay::None => {
-                if self.form.focus == Focus::Tags && !self.tag_popup.items.is_empty() {
-                    "↑↓ choose · Enter/Tab accept · Esc dismiss".into()
+                if self.form.focus == Focus::Tags && self.tag_completion.is_open() {
+                    "Tab/↓ next · ↑ previous · Enter accept · Esc dismiss".into()
                 } else if self.is_edit() {
                     "Ctrl+Enter save · Tab next field · Alt+B/I/U/C format · Alt+P preview · Alt+F attach · Alt+X $EDITOR · Esc close".into()
                 } else {
@@ -662,62 +681,27 @@ impl AddUi {
 
     // ---- tags ----------------------------------------------------------------------
 
-    fn tag_cursor_byte(&self) -> usize {
-        let text = self.form.tags.text();
-        let target = self.form.tags.cursor_column();
-        let mut acc = 0;
-        for (i, c) in text.char_indices() {
-            if acc >= target {
-                return i;
+    /// The tag completion key: an Enter-accepted tag is followed by a space,
+    /// as desktop's tag editor does, so the next tag can be typed at once.
+    fn tag_completion_key(&mut self, b: &dyn Backend, key: &KeyEvent) -> CompletionOutcome {
+        let before = self.form.tags.text().to_owned();
+        let outcome = self
+            .tag_completion
+            .handle_key(key, &mut self.form.tags, &mut tag_source(b));
+        if outcome == CompletionOutcome::Accepted {
+            let rest = &self.form.tags.text()[completion::cursor_byte(&self.form.tags)..];
+            if rest.starts_with(' ') {
+                self.form
+                    .tags
+                    .handle_key(&KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+            } else {
+                self.form.tags.insert_str(" ");
             }
-            acc += c.width().unwrap_or(0);
         }
-        text.len()
-    }
-
-    fn tag_word(&self) -> (usize, String) {
-        let text = self.form.tags.text();
-        let cur = self.tag_cursor_byte();
-        let start = text[..cur].rfind(char::is_whitespace).map_or(0, |i| i + 1);
-        (start, text[start..cur].to_owned())
-    }
-
-    fn refresh_tag_popup(&mut self, b: &dyn Backend) {
-        let (_, word) = self.tag_word();
-        self.tag_popup.selected = 0;
-        self.tag_popup.items = if word.is_empty() {
-            Vec::new()
-        } else {
-            match run(
-                b,
-                NoteCommand::CompleteTag {
-                    input: word.clone(),
-                    limit: 8,
-                },
-            ) {
-                Ok(EditResponse::Strings(s)) => s.into_iter().filter(|t| *t != word).collect(),
-                _ => Vec::new(),
-            }
-        };
-    }
-
-    fn accept_tag(&mut self) {
-        let Some(choice) = self.tag_popup.items.get(self.tag_popup.selected).cloned() else {
-            return;
-        };
-        let text = self.form.tags.text().to_owned();
-        let cur = self.tag_cursor_byte();
-        let (start, _) = self.tag_word();
-        let rest = &text[cur..];
-        let sep = if rest.starts_with(' ') { "" } else { " " };
-        let new = format!("{}{choice}{sep}{rest}", &text[..start]);
-        let left_count = rest.chars().count() - usize::from(rest.starts_with(' '));
-        self.form.tags = TextInput::new(new);
-        let left = KeyEvent::new(KeyCode::Left, KeyModifiers::NONE);
-        for _ in 0..left_count {
-            self.form.tags.handle_key(&left);
+        if self.form.tags.text() != before {
+            self.run_check(b);
         }
-        self.tag_popup = TagPopup::default();
+        outcome
     }
 
     // ---- input -----------------------------------------------------------------------
@@ -746,7 +730,9 @@ impl AddUi {
         match self.form.focus {
             Focus::Tags => {
                 self.form.tags.insert_str(text);
-                self.refresh_tag_popup(b);
+                self.tag_completion
+                    .refresh(&self.form.tags, &mut tag_source(b));
+                self.run_check(b);
             }
             Focus::Field(i) => {
                 let paths = media::detect_paths(text);
@@ -780,7 +766,6 @@ impl AddUi {
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         let tags_focused = self.form.focus == Focus::Tags;
-        let popup_open = tags_focused && !self.tag_popup.items.is_empty();
         // Add / save.
         let is_add = match key.code {
             KeyCode::Enter => ctrl || alt,
@@ -790,17 +775,13 @@ impl AddUi {
         if is_add {
             return self.submit(b);
         }
+        // The tags input and its popup take the key first; Tab with nothing
+        // to complete, Esc with the popup closed and shortcuts fall through.
+        if tags_focused && self.tag_completion_key(b, &key) != CompletionOutcome::Ignored {
+            return AddIntent::None;
+        }
         match key.code {
-            KeyCode::Esc if popup_open => {
-                self.tag_popup = TagPopup::default();
-                return AddIntent::None;
-            }
             KeyCode::Esc => return self.request_close(),
-            KeyCode::Tab if popup_open => {
-                self.accept_tag();
-                self.refresh_tag_popup(b);
-                return AddIntent::None;
-            }
             KeyCode::Tab => {
                 self.move_focus(true);
                 return AddIntent::None;
@@ -826,7 +807,7 @@ impl AddUi {
             }
         }
         match self.form.focus {
-            Focus::Tags => self.tags_key(b, key),
+            Focus::Tags => AddIntent::None,
             Focus::Field(i) => {
                 let before = self.form.fields[i].area.value().to_owned();
                 if self.form.fields[i].area.handle_key(&key)
@@ -839,37 +820,9 @@ impl AddUi {
         }
     }
 
-    fn tags_key(&mut self, b: &dyn Backend, key: KeyEvent) -> AddIntent {
-        let popup_open = !self.tag_popup.items.is_empty();
-        match key.code {
-            KeyCode::Down if popup_open => {
-                self.tag_popup.selected =
-                    (self.tag_popup.selected + 1) % self.tag_popup.items.len();
-            }
-            KeyCode::Up if popup_open => {
-                let n = self.tag_popup.items.len();
-                self.tag_popup.selected = (self.tag_popup.selected + n - 1) % n;
-            }
-            KeyCode::Enter if popup_open => {
-                self.accept_tag();
-                self.refresh_tag_popup(b);
-            }
-            _ => {
-                let before = self.form.tags.text().to_owned();
-                if self.form.tags.handle_key(&key) {
-                    self.refresh_tag_popup(b);
-                    if self.form.tags.text() != before {
-                        self.run_check(b);
-                    }
-                }
-            }
-        }
-        AddIntent::None
-    }
-
     fn move_focus(&mut self, forward: bool) {
         let n = self.form.fields.len();
-        self.tag_popup = TagPopup::default();
+        self.tag_completion.close();
         self.form.focus = match (self.form.focus, forward) {
             (Focus::Field(i), true) if i + 1 < n => Focus::Field(i + 1),
             (Focus::Field(_), true) => Focus::Tags,
