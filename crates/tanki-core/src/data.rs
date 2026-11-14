@@ -7,6 +7,9 @@ use std::path::PathBuf;
 pub struct OpenOptions {
     /// User confirms desktop is closed after an unclean shutdown. Never bypasses /proc or locks.
     pub confirmed_closed: bool,
+    /// tanki has opened this collection before (config's seen list), so the
+    /// open backup follows Anki's schedule instead of being forced (PLAN 4.4).
+    pub seen_before: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -43,6 +46,10 @@ pub struct SyncReport {
     pub required: SyncRequired,
     pub server_message: String,
     pub new_endpoint: Option<String>,
+    /// The collection has completed a sync with some server before (checked
+    /// locally). The first sync with a new server is then one-way (PLAN 2).
+    #[serde(default)]
+    pub synced_before: bool,
 }
 
 #[derive(Clone)]

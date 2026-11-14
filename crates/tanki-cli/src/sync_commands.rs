@@ -5,7 +5,6 @@
 //! and passwords never appear in any output.
 // The lead wires `run`/`run_server` into `main.rs`; until then the module is
 // only reached from its tests.
-#![allow(dead_code)]
 
 use clap::{Args, Subcommand, ValueEnum};
 use serde_json::json;
@@ -142,9 +141,8 @@ impl std::fmt::Display for SyncCliError {
 
 impl std::error::Error for SyncCliError {}
 
-/// Shown when a profile is pointed at a server for the first time, or at a
-/// different server. The library has no actor command yet to ask whether the
-/// collection synced before, so it is shown on every first configuration.
+/// Shown after logging in to a new server when the collection has synced
+/// before (`SyncReport::synced_before`), or when that cannot be checked.
 pub const FIRST_TIME_WARNING: &str = "Note: if this collection has synced with another server \
      before (for example AnkiWeb), the first sync with this server is a one-way full upload or \
      download that replaces one side, and every other device (desktop, phone) must then be \
@@ -299,9 +297,6 @@ fn login(
     }
     let password = (io.read_secret)("Password: ", password_stdin)?;
     let changed = previous.as_ref() != Some(&endpoint);
-    if changed {
-        writeln!(io.err, "{FIRST_TIME_WARNING}")?;
-    }
     let credentials = match operation(
         actor,
         SyncCommand::Login {
@@ -325,6 +320,23 @@ fn login(
     sync.url = Some(credentials.endpoint.clone());
     sync.username = Some(username.clone());
     config.save(config_path)?;
+    // PLAN 2: warn when a collection that synced before meets a new server.
+    // The check is local; if it cannot run, warn anyway.
+    if changed {
+        let synced_before = match operation(
+            actor,
+            SyncCommand::Status {
+                auth: credentials.clone(),
+            },
+            io.err,
+        ) {
+            Ok(DataResponse::Synced(report)) => report.synced_before,
+            _ => true,
+        };
+        if synced_before {
+            writeln!(io.err, "{FIRST_TIME_WARNING}")?;
+        }
+    }
     if json {
         writeln!(
             io.out,
@@ -378,19 +390,13 @@ fn sync(
             return Err(SyncCliError::FullSyncChoiceRequired { upload, download }.into());
         }
     }
-    // Media follows a full upload. A normal run and a full download (the
-    // actor syncs media after installing it) have done it already.
-    if direction == SyncDirection::Upload && media {
-        let auth = stored_auth(profile, config_path)?;
-        match operation(actor, SyncCommand::Media { auth }, io.err) {
-            Ok(_) => {}
-            Err(error) => return Err(map_error(error, profile, config_path)),
-        }
-    }
+    // Media has been synced already: by a normal run, or by the actor after
+    // a full upload or download.
     let report = report.unwrap_or(SyncReport {
         required: SyncRequired::NoChanges,
         server_message: String::new(),
         new_endpoint: None,
+        synced_before: false,
     });
     if json {
         writeln!(io.out, "{}", report_json(&report, Some(direction), media))?;
@@ -903,7 +909,8 @@ mod tests {
         assert_eq!(reply["endpoint"], server.url.as_str());
         assert_eq!(reply["username"], USER);
         assert_eq!(reply["server_changed"], true);
-        assert!(login.err.contains("one-way full upload or download"));
+        // A collection that never synced gets no one-way warning.
+        assert!(!login.err.contains("one-way"), "{}", login.err);
         let hkey = Credentials::load(&credentials_path(&config))
             .unwrap()
             .get(&profile_key(&actor))
@@ -989,6 +996,20 @@ mod tests {
         normal.result.unwrap();
         let reply: serde_json::Value = serde_json::from_str(&normal.out).unwrap();
         assert_eq!(reply["required"], "no_changes");
+        // Now it has synced: pointing it at another server warns (PLAN 2).
+        let other = Server::start();
+        let moved = call(
+            &actor,
+            &["login", "--url", &other.url, "--username", USER],
+            &config,
+            PASSWORD,
+        );
+        moved.result.unwrap();
+        assert!(
+            moved.err.contains("one-way full upload or download"),
+            "{}",
+            moved.err
+        );
         actor.close().unwrap();
     }
 

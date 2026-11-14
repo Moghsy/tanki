@@ -30,6 +30,9 @@ struct Args {
     /// closed (it is left behind by a crash). Other-process checks still apply.
     #[arg(long, global = true)]
     confirm_closed: bool,
+    /// tanki's config file [default: $XDG_CONFIG_HOME/tanki/config.toml].
+    #[arg(long, global = true)]
+    config: Option<PathBuf>,
     /// JSON array of {scope, key, action} overrides; null action unbinds a key.
     #[arg(long, global = true)]
     keymap: Option<PathBuf>,
@@ -66,6 +69,10 @@ enum CliCommand {
     Decks,
     /// Probe terminal capabilities and display a test image.
     Doctor,
+    /// Sync with your self-hosted server (`sync login --url URL` first).
+    Sync(sync_commands::SyncArgs),
+    /// Run Anki's own sync server for your devices (plain HTTP).
+    SyncServer(sync_commands::SyncServerArgs),
     /// Import an .apkg deck package (never replaces the collection).
     Import(package_commands::ImportArgs),
     /// Export notes as .apkg, or the whole collection as .colpkg.
@@ -95,13 +102,43 @@ fn profile_path(args: &Args) -> Result<PathBuf> {
 }
 
 /// Always call close, even when the operation failed: close joins the exit backup.
+fn config_path(args: &Args) -> Option<PathBuf> {
+    args.config
+        .clone()
+        .or_else(tanki_core::config::default_path)
+}
+
+/// Opens the collection. The first open of a collection tanki has not seen
+/// forces a backup; later opens follow Anki's backup schedule (PLAN 4.4).
 fn with_collection<T>(
     path: &Path,
-    confirmed_closed: bool,
+    args: &Args,
     operation: impl FnOnce(&CollectionActor) -> Result<T>,
 ) -> Result<T> {
-    let actor =
-        CollectionActor::open_with_options(path, tanki_core::OpenOptions { confirmed_closed })?;
+    let config = config_path(args);
+    let mut loaded = match &config {
+        Some(file) => Some(tanki_core::config::Config::load(file)?),
+        None => None,
+    };
+    let collection = path.canonicalize()?.join("collection.anki2");
+    let seen_before = loaded.as_ref().is_some_and(|c| c.has_seen(&collection));
+    let actor = CollectionActor::open_with_options(
+        path,
+        tanki_core::OpenOptions {
+            confirmed_closed: args.confirm_closed,
+            seen_before,
+        },
+    )?;
+    if let (Some(file), Some(loaded)) = (&config, loaded.as_mut()) {
+        if loaded.mark_seen(&collection) {
+            if let Err(error) = loaded.save(file) {
+                eprintln!(
+                    "tanki: could not record the collection in {}: {error}",
+                    file.display()
+                );
+            }
+        }
+    }
     let result = operation(&actor);
     let closed = actor.close();
     match (result, closed) {
@@ -159,8 +196,63 @@ fn decks_text(tree: &Deck) -> String {
     out
 }
 
+/// Auto-sync on open and close (PLAN 8.9): only when the profile has a
+/// server, a stored login and auto-sync turned on. Never fatal, and never
+/// makes a full-sync choice.
+fn auto_sync(actor: &CollectionActor, args: &Args, when: &str) {
+    use tanki_core::{config, DataCommand, DataResponse, SyncCommand, SyncDirection, SyncRequired};
+    let Some(file) = config_path(args) else {
+        return;
+    };
+    let profile = actor.profile_dir().to_string_lossy().into_owned();
+    let enabled = config::Config::load(&file).ok().is_some_and(|c| {
+        c.profile(&profile).is_some_and(|p| p.sync.auto_sync)
+            && c.sync_endpoint(&profile).ok().flatten().is_some()
+    });
+    if !enabled {
+        return;
+    }
+    let auth = match config::Credentials::load(&config::credentials_path(&file))
+        .and_then(|c| c.get(&profile))
+    {
+        Ok(Some(auth)) => auth,
+        _ => {
+            eprintln!("tanki: auto sync on {when} skipped: log in with `tanki sync login`.");
+            return;
+        }
+    };
+    let run = DataCommand::Sync(SyncCommand::Run {
+        auth,
+        direction: SyncDirection::Normal,
+        media: true,
+    });
+    match actor.start_data(run).and_then(|pending| pending.wait()) {
+        Ok(DataResponse::Synced(report))
+            if matches!(report.required, SyncRequired::Full { .. }) =>
+        {
+            eprintln!(
+                "tanki: auto sync on {when} skipped: a one-way full sync must be chosen; run `tanki sync`."
+            )
+        }
+        Ok(_) => {}
+        Err(error) => eprintln!("tanki: auto sync on {when} failed: {error}"),
+    }
+}
+
 fn run(args: Args) -> Result<()> {
     match &args.command {
+        Some(CliCommand::SyncServer(command)) => {
+            // First, before anything starts a thread: the server sets its
+            // users through process environment variables.
+            sync_commands::run_server(command)?;
+        }
+        Some(CliCommand::Sync(command)) => {
+            let config = config_path(&args)
+                .ok_or("No config folder: set XDG_CONFIG_HOME or HOME, or pass --config")?;
+            with_collection(&profile_path(&args)?, &args, |actor| {
+                sync_commands::run(actor, command, args.json, &config)
+            })?;
+        }
         Some(CliCommand::Doctor) => {
             let report = tanki_term::SystemTerminalDoctor.run(&tanki_term::DoctorOptions {
                 graphics: args.graphics.into(),
@@ -169,22 +261,22 @@ fn run(args: Args) -> Result<()> {
             println!("{}", report.summary);
         }
         Some(CliCommand::Import(command)) => {
-            with_collection(&profile_path(&args)?, args.confirm_closed, |actor| {
+            with_collection(&profile_path(&args)?, &args, |actor| {
                 package_commands::run_import(actor, command, args.json)
             })?;
         }
         Some(CliCommand::Export(command)) => {
-            with_collection(&profile_path(&args)?, args.confirm_closed, |actor| {
+            with_collection(&profile_path(&args)?, &args, |actor| {
                 package_commands::run_export(actor, command, args.json)
             })?;
         }
         Some(CliCommand::Backup(command)) => {
-            with_collection(&profile_path(&args)?, args.confirm_closed, |actor| {
+            with_collection(&profile_path(&args)?, &args, |actor| {
                 package_commands::run_backup(actor, command, args.json)
             })?;
         }
         Some(CliCommand::FixtureDump) => {
-            with_collection(&profile_path(&args)?, args.confirm_closed, |actor| {
+            with_collection(&profile_path(&args)?, &args, |actor| {
                 let Response::CardIds(ids) = actor.execute(Command::Search {
                     query: String::new(),
                 })?
@@ -204,7 +296,7 @@ fn run(args: Args) -> Result<()> {
             })?;
         }
         Some(CliCommand::Decks) => {
-            let output = with_collection(&profile_path(&args)?, args.confirm_closed, |actor| {
+            let output = with_collection(&profile_path(&args)?, &args, |actor| {
                 let tree = backend::deck_tree(actor)?;
                 if args.json {
                     Ok(serde_json::to_string_pretty(&tree)?)
@@ -222,13 +314,14 @@ fn run(args: Args) -> Result<()> {
             }
             let keymap = load_keymap(args.keymap.as_deref())?;
             let path = profile_path(&args)?;
-            with_collection(&path, args.confirm_closed, |actor| {
+            with_collection(&path, &args, |actor| {
                 if let Some(CliCommand::Review { deck: Some(name) }) = &args.command {
                     let tree = backend::deck_tree(actor)?;
                     let id = backend::find_deck(&tree, name)
                         .ok_or_else(|| format!("No deck named {name:?}"))?;
                     backend::select_deck(actor, id)?;
                 }
+                auto_sync(actor, &args, "open");
                 tanki_tui::terminal::run(
                     actor,
                     tanki_tui::terminal::Options {
@@ -241,6 +334,7 @@ fn run(args: Args) -> Result<()> {
                         keymap,
                     },
                 )?;
+                auto_sync(actor, &args, "close");
                 Ok(())
             })?;
         }
@@ -250,6 +344,9 @@ fn run(args: Args) -> Result<()> {
 /// PLAN 9 exit codes; see `docs/implementation/phase-2-interfaces.md`.
 fn exit_code(error: &(dyn std::error::Error + 'static)) -> u8 {
     if let Some(error) = error.downcast_ref::<package_commands::PackageError>() {
+        return error.exit_code();
+    }
+    if let Some(error) = error.downcast_ref::<sync_commands::SyncCliError>() {
         return error.exit_code();
     }
     match error.downcast_ref::<CoreError>() {

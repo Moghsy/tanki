@@ -90,6 +90,7 @@ fn clean_close_leaves_no_wal_and_a_leftover_wal_needs_confirmation() -> Result<(
         dir.path(),
         OpenOptions {
             confirmed_closed: true,
+            ..Default::default()
         },
     )?;
     actor.close()?;
@@ -120,7 +121,13 @@ fn holder_that_lost_its_lock_is_found_through_proc() -> Result<()> {
     drop(conn);
     let pid = holder.id().to_string();
     for confirmed_closed in [false, true] {
-        match CollectionActor::open_with_options(dir.path(), OpenOptions { confirmed_closed }) {
+        match CollectionActor::open_with_options(
+            dir.path(),
+            OpenOptions {
+                confirmed_closed,
+                ..Default::default()
+            },
+        ) {
             Err(CoreError::InUse(message)) => assert!(message.contains(&pid), "{message}"),
             other => panic!("expected InUse, got {:?}", other.err()),
         }
@@ -291,6 +298,7 @@ fn killed_process_leaves_no_partial_backup() -> Result<()> {
             dir.path(),
             OpenOptions {
                 confirmed_closed: true,
+                ..Default::default()
             },
         )?;
         actor.close()?;
@@ -406,7 +414,12 @@ fn restore_while_another_process_holds_the_file_is_refused() -> Result<()> {
     add(&actor, "must survive")?;
     let file = profile.canonicalize()?.join("collection.anki2");
     let mut child = Process::new(std::env::current_exe().unwrap())
-        .args(["--exact", "plain_holder_child", "--nocapture", "--test-threads=1"])
+        .args([
+            "--exact",
+            "plain_holder_child",
+            "--nocapture",
+            "--test-threads=1",
+        ])
         .env(PLAIN_HOLDER_ENV, &file)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -431,6 +444,10 @@ fn restore_while_another_process_holds_the_file_is_refused() -> Result<()> {
     }
     assert!(matches!(after, Err(CoreError::ActorStopped)));
     let actor = CollectionActor::open(&profile)?;
-    assert_eq!(note_count(&actor)?, 1, "the live collection was not replaced");
+    assert_eq!(
+        note_count(&actor)?,
+        1,
+        "the live collection was not replaced"
+    );
     actor.close()
 }

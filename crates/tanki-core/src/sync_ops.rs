@@ -46,12 +46,20 @@ pub fn execute(col: &mut Collection, command: SyncCommand) -> Result<DataRespons
             username,
             password,
         } => login(col, &endpoint, username, password).map(DataResponse::LoggedIn),
-        SyncCommand::Status { auth } => status(col, &auth).map(DataResponse::Synced),
+        SyncCommand::Status { auth } => {
+            let mut report = status(col, &auth)?;
+            report.synced_before = has_synced_before(col)?;
+            Ok(DataResponse::Synced(report))
+        }
         SyncCommand::Run {
             auth,
             direction: SyncDirection::Normal,
             media,
-        } => normal(col, &auth, media).map(DataResponse::Synced),
+        } => {
+            let mut report = normal(col, &auth, media)?;
+            report.synced_before = has_synced_before(col)?;
+            Ok(DataResponse::Synced(report))
+        }
         SyncCommand::Run { .. } => Err(CoreError::Invalid(
             "Full upload and download are handled by the collection actor".into(),
         )),
@@ -200,6 +208,7 @@ fn status(col: &mut Collection, auth: &SyncCredentials) -> Result<SyncReport> {
                 },
                 server_message: String::new(),
                 new_endpoint: None,
+                synced_before: false,
             })
         }
         Required::NormalSync => {
@@ -207,6 +216,7 @@ fn status(col: &mut Collection, auth: &SyncCredentials) -> Result<SyncReport> {
                 required: SyncRequired::Normal,
                 server_message: String::new(),
                 new_endpoint: None,
+                synced_before: false,
             })
         }
         Required::NoChanges => {}
@@ -223,6 +233,7 @@ fn status(col: &mut Collection, auth: &SyncCredentials) -> Result<SyncReport> {
         required: required(state.required),
         server_message: state.server_message,
         new_endpoint: checked_new_endpoint(state.new_endpoint)?,
+        synced_before: false,
     })
 }
 
@@ -236,6 +247,7 @@ fn normal(col: &mut Collection, auth: &SyncCredentials, media: bool) -> Result<S
         required: required(output.required),
         server_message: output.server_message,
         new_endpoint: checked_new_endpoint(output.new_endpoint)?,
+        synced_before: false,
     };
     // A full sync must be chosen first; media follows it (desktop does the same).
     if media && !matches!(report.required, SyncRequired::Full { .. }) {

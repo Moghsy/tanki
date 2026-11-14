@@ -2,10 +2,7 @@ use std::process::Command;
 
 #[test]
 fn version_has_unofficial_disclaimer() {
-    let output = Command::new(env!("CARGO_BIN_EXE_tanki"))
-        .arg("--version")
-        .output()
-        .unwrap();
+    let output = tanki().arg("--version").output().unwrap();
     assert!(output.status.success());
     assert!(String::from_utf8(output.stdout)
         .unwrap()
@@ -13,15 +10,12 @@ fn version_has_unofficial_disclaimer() {
 }
 #[test]
 fn fixture_dump_requires_explicit_safe_base() {
-    let missing = Command::new(env!("CARGO_BIN_EXE_tanki"))
-        .arg("fixture-dump")
-        .output()
-        .unwrap();
+    let missing = tanki().arg("fixture-dump").output().unwrap();
     assert!(!missing.status.success());
     assert!(String::from_utf8(missing.stderr)
         .unwrap()
         .contains("explicit --base"));
-    let denied = Command::new(env!("CARGO_BIN_EXE_tanki"))
+    let denied = tanki()
         .args(["--base", env!("CARGO_MANIFEST_DIR"), "fixture-dump"])
         .env_remove("TANKI_ALLOW_REAL_PROFILE")
         .output()
@@ -34,7 +28,7 @@ fn fixture_dump_requires_explicit_safe_base() {
 
 #[test]
 fn doctor_non_tty_has_no_escape_sequences() {
-    let output = Command::new(env!("CARGO_BIN_EXE_tanki"))
+    let output = tanki()
         .args(["--graphics=kitty", "doctor"])
         .output()
         .unwrap();
@@ -46,7 +40,7 @@ fn doctor_non_tty_has_no_escape_sequences() {
 }
 
 fn fixture_dump(base: &std::path::Path) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_tanki"));
+    let mut command = tanki();
     command
         .arg("--base")
         .arg(base)
@@ -142,7 +136,7 @@ fn generated_fixture() -> tempfile::TempDir {
 }
 
 fn fixture_command(base: &std::path::Path) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_tanki"));
+    let mut command = tanki();
     command
         .arg("--base")
         .arg(base)
@@ -217,10 +211,7 @@ fn review_non_tty_and_missing_deck_errors_still_close_and_backup() {
 #[test]
 fn study_commands_require_safe_base_and_profile_names() {
     for command in ["review", "decks"] {
-        let missing = Command::new(env!("CARGO_BIN_EXE_tanki"))
-            .arg(command)
-            .output()
-            .unwrap();
+        let missing = tanki().arg(command).output().unwrap();
         assert!(!missing.status.success());
         assert!(String::from_utf8_lossy(&missing.stderr).contains("explicit --base"));
         let base = tempfile::tempdir().unwrap();
@@ -270,4 +261,54 @@ fn leftover_wal_exits_25_until_confirmed_closed() {
         String::from_utf8_lossy(&confirmed.stderr)
     );
     assert!(!wal.exists(), "a clean close removes the WAL");
+}
+
+/// The binary under test, with its config folder kept out of the user's
+/// home (it records every collection it opens).
+fn tanki() -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_tanki"));
+    command.env(
+        "XDG_CONFIG_HOME",
+        std::env::temp_dir().join(format!("tanki-cli-test-config-{}", std::process::id())),
+    );
+    command
+}
+
+/// PLAN 4.4: the first open of an unseen collection forces a backup; later
+/// opens follow Anki's schedule (30-minute default interval), so a burst of
+/// CLI commands does not write a backup each.
+#[test]
+fn only_the_first_open_of_a_collection_forces_a_backup() {
+    let base = generated_fixture();
+    let config = base.path().join("config.toml");
+    let backups = || {
+        std::fs::read_dir(base.path().join("tanki-fixture/backups"))
+            .unwrap()
+            .count()
+    };
+    let decks = || {
+        let output = fixture_command(base.path())
+            .arg("--config")
+            .arg(&config)
+            .arg("decks")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    let before = backups();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    decks();
+    let first = backups();
+    assert_eq!(first, before + 1, "unseen collection: forced backup");
+    assert!(std::fs::read_to_string(&config)
+        .unwrap()
+        .contains("collection.anki2"));
+    for _ in 0..3 {
+        decks();
+    }
+    assert_eq!(backups(), first, "seen collection: Anki's interval applies");
 }

@@ -178,8 +178,7 @@ impl SyncUi {
                 }
             }
             Ok(_) => match request {
-                // The actor syncs media after a full download itself.
-                SyncRequest::Upload if self.media => self.start(SyncRequest::Media),
+                // The actor syncs media after a full upload or download.
                 SyncRequest::Upload => {
                     self.done("Full upload complete.", String::new());
                     SyncIntent::Finished { new_endpoint: None }
@@ -482,6 +481,7 @@ mod tests {
             required,
             server_message: String::new(),
             new_endpoint: None,
+            synced_before: false,
         }))
     }
 
@@ -583,6 +583,7 @@ mod tests {
                 },
                 server_message: String::new(),
                 new_endpoint: Some("http://127.0.0.1:9/".into()),
+                synced_before: false,
             }))),
             SyncIntent::SaveEndpoint("http://127.0.0.1:9/".into())
         );
@@ -619,14 +620,10 @@ mod tests {
             }
         ));
         let mut download = ui.clone();
-        // Media follows a full upload, then the app refreshes.
+        // The actor syncs media after a full upload itself; the app refreshes.
         assert_eq!(
             ui.on_key(key(KeyCode::Enter)),
             SyncIntent::Start(SyncRequest::Upload)
-        );
-        assert_eq!(
-            ui.on_response(Ok(DataResponse::Done)),
-            SyncIntent::Start(SyncRequest::Media)
         );
         assert_eq!(
             ui.on_response(Ok(DataResponse::Done)),
@@ -692,6 +689,7 @@ mod tests {
                 required: SyncRequired::NoChanges,
                 server_message: "Welcome".into(),
                 new_endpoint: Some("http://h/".into()),
+                synced_before: false,
             }))),
             SyncIntent::Finished {
                 new_endpoint: Some("http://h/".into())

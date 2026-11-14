@@ -53,7 +53,8 @@ fn review_undo_backups_and_locking() -> Result<()> {
         CollectionActor::open_with_options(
             dir.path(),
             OpenOptions {
-                confirmed_closed: true
+                confirmed_closed: true,
+                ..Default::default()
             }
         ),
         Err(CoreError::Locked)

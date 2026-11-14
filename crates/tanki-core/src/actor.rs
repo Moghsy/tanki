@@ -77,7 +77,8 @@ impl CollectionActor {
                     crate::backup::clear_incoming(&profile.join("backups"))?;
                     let col = open_collection(&profile, &shared)?;
                     // Backup failure fails the open: no command runs unbacked.
-                    let (col, saved) = backup_and_relock(col, &profile, &shared)?;
+                    let (col, saved) =
+                        backup_and_relock_with(col, &profile, &shared, !options.seen_before)?;
                     if let Err(error) = saved {
                         let _ = col.close(None);
                         return Err(error);
@@ -499,8 +500,23 @@ fn owned_data(
         DataCommand::Sync(SyncCommand::Run {
             auth,
             direction: SyncDirection::Upload,
-            ..
-        }) => reopen(sync_ops::upload(col, auth).map(|()| DataResponse::Done)),
+            media,
+        }) => {
+            let uploaded = sync_ops::upload(col, auth.clone());
+            let (reopened, result) = reopen(uploaded.map(|()| DataResponse::Done));
+            let Ok(mut col) = reopened else {
+                return (reopened, result);
+            };
+            // Media follows the collection, as after a full download.
+            let result = result.and_then(|done| {
+                if media {
+                    sync_ops::execute(&mut col, SyncCommand::Media { auth })
+                } else {
+                    Ok(done)
+                }
+            });
+            (Ok(col), result)
+        }
         DataCommand::Sync(SyncCommand::Run {
             auth,
             direction: SyncDirection::Download,
