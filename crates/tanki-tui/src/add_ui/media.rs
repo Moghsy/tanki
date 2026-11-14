@@ -15,7 +15,10 @@ pub const NO_CLIPBOARD_TOOL: &str =
 pub fn clipboard_image() -> Result<Vec<u8>, String> {
     let attempts: [(&str, &[&str]); 2] = [
         ("wl-paste", &["--type", "image/png"]),
-        ("xclip", &["-selection", "clipboard", "-t", "image/png", "-o"]),
+        (
+            "xclip",
+            &["-selection", "clipboard", "-t", "image/png", "-o"],
+        ),
     ];
     let mut found = false;
     for (program, args) in attempts {
@@ -221,7 +224,10 @@ mod tests {
         assert_eq!(detect_paths(&two), vec![a.clone(), b.clone()]);
         assert!(detect_paths("just some text").is_empty());
         assert!(detect_paths("https://example.com/x.png").is_empty());
-        assert!(detect_paths(dir.to_str().unwrap()).is_empty(), "a directory is not a file");
+        assert!(
+            detect_paths(dir.to_str().unwrap()).is_empty(),
+            "a directory is not a file"
+        );
         assert!(detect_paths(&format!("{a_s} /no/such/file")).is_empty());
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -237,8 +243,14 @@ mod tests {
             complete_path(&base),
             vec![format!("{base}alpha.png"), format!("{base}sub/")]
         );
-        assert_eq!(complete_path(&format!("{base}al")), vec![format!("{base}alpha.png")]);
-        assert_eq!(complete_path(&format!("{base}.")), vec![format!("{base}.hidden")]);
+        assert_eq!(
+            complete_path(&format!("{base}al")),
+            vec![format!("{base}alpha.png")]
+        );
+        assert_eq!(
+            complete_path(&format!("{base}.")),
+            vec![format!("{base}.hidden")]
+        );
         assert!(complete_path("/no/such/dir/x").is_empty());
         std::fs::remove_dir_all(dir).unwrap();
     }

@@ -117,7 +117,10 @@ mod tests {
             run("a\nb", true, EditorCommand::UnorderedList).0,
             "<ul><li>a</li><li>b</li></ul>"
         );
-        assert_eq!(run("a", true, EditorCommand::OrderedList).0, "<ol><li>a</li></ol>");
+        assert_eq!(
+            run("a", true, EditorCommand::OrderedList).0,
+            "<ol><li>a</li></ol>"
+        );
         assert_eq!(
             run("", false, EditorCommand::UnorderedList),
             ("<ul><li></li></ul>".into(), 8)
@@ -128,8 +131,14 @@ mod tests {
     fn math_and_chemistry() {
         assert_eq!(run("x", true, EditorCommand::MathInline).0, "\\(x\\)");
         assert_eq!(run("x", true, EditorCommand::MathBlock).0, "\\[x\\]");
-        assert_eq!(run("H2O", true, EditorCommand::Chemistry).0, "\\(\\ce{H2O}\\)");
-        assert_eq!(run("", false, EditorCommand::Chemistry), ("\\(\\ce{}\\)".into(), 6));
+        assert_eq!(
+            run("H2O", true, EditorCommand::Chemistry).0,
+            "\\(\\ce{H2O}\\)"
+        );
+        assert_eq!(
+            run("", false, EditorCommand::Chemistry),
+            ("\\(\\ce{}\\)".into(), 6)
+        );
     }
 
     #[test]
@@ -157,6 +166,9 @@ mod tests {
         ));
         apply(&mut b, EditorCommand::Cloze(same_cloze_number(&[1])));
         assert_eq!(b.value(), "a {{c1::b}}  {{c1::c}}  ");
-        assert_eq!(run("", false, EditorCommand::Cloze(2)), ("{{c2::}}".into(), 6));
+        assert_eq!(
+            run("", false, EditorCommand::Cloze(2)),
+            ("{{c2::}}".into(), 6)
+        );
     }
 }

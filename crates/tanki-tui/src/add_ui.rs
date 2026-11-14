@@ -29,8 +29,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{buffer::Buffer, layout::Rect};
 use std::path::PathBuf;
 use tanki_core::{
-    Command, EditResponse, FieldInfo, FieldsCheck, NoteCommand, NoteData, NoteUpdate,
-    NotetypeInfo, NotetypeKind, OpChanges, Response,
+    Command, EditResponse, FieldInfo, FieldsCheck, NoteCommand, NoteData, NoteUpdate, NotetypeInfo,
+    NotetypeKind, OpChanges, Response,
 };
 use unicode_width::UnicodeWidthChar;
 
@@ -55,7 +55,9 @@ pub enum AddIntent {
     /// Show this in the app's message line.
     Message(String),
     /// Open the browser on this note (`nid:`).
-    OpenBrowser { note_id: i64 },
+    OpenBrowser {
+        note_id: i64,
+    },
     /// Run `$EDITOR` and hand the result back with
     /// [`AddUi::apply_external_field`] / [`AddUi::apply_external_note`].
     ExternalEdit(ExternalEdit),
@@ -89,7 +91,10 @@ pub const KEYS: &[(&str, &str)] = &[
     ("Alt+T", "text colour"),
     ("Alt+L / Alt+O", "bulleted / numbered list"),
     ("Alt+C / Alt+Shift+C", "cloze: new number / same number"),
-    ("Alt+M / Alt+Shift+M / Alt+E", "math inline / block / chemistry"),
+    (
+        "Alt+M / Alt+Shift+M / Alt+E",
+        "math inline / block / chemistry",
+    ),
     ("Alt+F / Alt+V", "attach file or URL / clipboard image"),
     ("Alt+X / Alt+Shift+X", "edit field / note in $EDITOR"),
 ];
@@ -154,7 +159,10 @@ impl Form {
     }
 
     fn values(&self) -> Vec<String> {
-        self.fields.iter().map(|f| f.area.value().to_owned()).collect()
+        self.fields
+            .iter()
+            .map(|f| f.area.value().to_owned())
+            .collect()
     }
 
     fn tag_list(&self) -> Vec<String> {
@@ -185,7 +193,11 @@ impl Form {
 
 /// Desktop's "blank" test: nothing but `<br>` and whitespace.
 pub fn is_blank(s: &str) -> bool {
-    s.replace("<br>", "").replace("<br/>", "").replace("<br />", "").trim().is_empty()
+    s.replace("<br>", "")
+        .replace("<br/>", "")
+        .replace("<br />", "")
+        .trim()
+        .is_empty()
 }
 
 pub fn parse_tags(s: &str) -> Vec<String> {
@@ -203,7 +215,11 @@ fn tags_changed(old: &[String], new: &[String]) -> bool {
 /// Changing note type with content (R7 §1.3, desktop's algorithm): copy
 /// non-empty fields with the same name, then the remaining non-empty old
 /// fields by position into the slots not filled by name.
-pub fn carry_fields(old_names: &[String], old_values: &[String], new_names: &[String]) -> Vec<String> {
+pub fn carry_fields(
+    old_names: &[String],
+    old_values: &[String],
+    new_names: &[String],
+) -> Vec<String> {
     let mut out = vec![String::new(); new_names.len()];
     let mut copied: Vec<&str> = Vec::new();
     for (ni, name) in new_names.iter().enumerate() {
@@ -263,7 +279,10 @@ struct Picker {
 
 impl Picker {
     fn matches(&self) -> Vec<usize> {
-        crate::fuzzy::rank(self.query.text(), self.items.iter().map(|(_, n)| n.as_str()))
+        crate::fuzzy::rank(
+            self.query.text(),
+            self.items.iter().map(|(_, n)| n.as_str()),
+        )
     }
 }
 
@@ -322,7 +341,9 @@ pub struct AddUi {
 fn edit_response(r: Response) -> Result<EditResponse, String> {
     match r {
         Response::Edit(e) => Ok(e),
-        other => Err(format!("Unexpected response from the collection: {other:?}")),
+        other => Err(format!(
+            "Unexpected response from the collection: {other:?}"
+        )),
     }
 }
 
@@ -351,7 +372,12 @@ fn fetch_notetypes(b: &dyn Backend) -> Result<Vec<NotetypeInfo>, String> {
 }
 
 fn fetch_decks(b: &dyn Backend) -> Result<Vec<(i64, String)>, String> {
-    match run(b, NoteCommand::DeckNames { include_filtered: false })? {
+    match run(
+        b,
+        NoteCommand::DeckNames {
+            include_filtered: false,
+        },
+    )? {
         EditResponse::DeckNames(d) => Ok(d.into_iter().map(|d| (d.id, d.name)).collect()),
         other => unexpected(other),
     }
@@ -396,7 +422,10 @@ impl AddUi {
         let notetypes = fetch_notetypes(b)?;
         let decks = fetch_decks(b)?;
         let (deck_id, notetype_id) = match run(b, NoteCommand::DefaultsForAdding { home_deck })? {
-            EditResponse::Defaults { deck_id, notetype_id } => (deck_id, notetype_id),
+            EditResponse::Defaults {
+                deck_id,
+                notetype_id,
+            } => (deck_id, notetype_id),
             other => return unexpected(other),
         };
         let mut note_type = notetypes
@@ -404,7 +433,9 @@ impl AddUi {
             .find(|n| n.id == notetype_id && !n.image_occlusion)
             .cloned();
         let refused = note_type.is_none()
-            && notetypes.iter().any(|n| n.id == notetype_id && n.image_occlusion);
+            && notetypes
+                .iter()
+                .any(|n| n.id == notetype_id && n.image_occlusion);
         if note_type.is_none() {
             note_type = notetypes.iter().find(|n| !n.image_occlusion).cloned();
         }
@@ -526,24 +557,40 @@ impl AddUi {
         }
     }
 
-    pub fn render(&self, area: Rect, buf: &mut Buffer, renderer: &dyn crate::services::CardRenderer) {
+    pub fn render(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        renderer: &dyn crate::services::CardRenderer,
+    ) {
         render::draw(self, area, buf, renderer);
     }
 
     // ---- status ----------------------------------------------------------------
 
     fn set_status(&mut self, text: impl Into<String>) {
-        self.status = Some(Status { text: text.into(), error: false });
+        self.status = Some(Status {
+            text: text.into(),
+            error: false,
+        });
     }
 
     fn set_error(&mut self, text: impl Into<String>) {
-        self.status = Some(Status { text: text.into(), error: true });
+        self.status = Some(Status {
+            text: text.into(),
+            error: true,
+        });
     }
 
     // ---- checks and preview ------------------------------------------------------
 
     fn run_check(&mut self, b: &dyn Backend) {
-        match run(b, NoteCommand::CheckFields { note: self.form.note_data() }) {
+        match run(
+            b,
+            NoteCommand::CheckFields {
+                note: self.form.note_data(),
+            },
+        ) {
             Ok(EditResponse::FieldsCheck(c)) => self.form.check = c,
             Ok(_) => {}
             Err(e) => self.set_error(e),
@@ -551,7 +598,12 @@ impl AddUi {
     }
 
     fn cloze_numbers(&mut self, b: &dyn Backend) -> Vec<u32> {
-        match run(b, NoteCommand::ClozeNumbers { note: self.form.note_data() }) {
+        match run(
+            b,
+            NoteCommand::ClozeNumbers {
+                note: self.form.note_data(),
+            },
+        ) {
             Ok(EditResponse::Numbers(n)) => n,
             Ok(_) => Vec::new(),
             Err(e) => {
@@ -588,7 +640,13 @@ impl AddUi {
         self.form.preview_idx = self.form.preview_idx.min(ords.len() - 1);
         let ord = ords[self.form.preview_idx];
         self.preview = Some(
-            match run(b, NoteCommand::RenderPreview { note: self.form.note_data(), card_ord: ord }) {
+            match run(
+                b,
+                NoteCommand::RenderPreview {
+                    note: self.form.note_data(),
+                    card_ord: ord,
+                },
+            ) {
                 Ok(EditResponse::Rendered(card)) => Ok(card),
                 Ok(other) => unexpected(other),
                 Err(e) => Err(e),
@@ -630,7 +688,13 @@ impl AddUi {
         self.tag_popup.items = if word.is_empty() {
             Vec::new()
         } else {
-            match run(b, NoteCommand::CompleteTag { input: word.clone(), limit: 8 }) {
+            match run(
+                b,
+                NoteCommand::CompleteTag {
+                    input: word.clone(),
+                    limit: 8,
+                },
+            ) {
                 Ok(EditResponse::Strings(s)) => s.into_iter().filter(|t| *t != word).collect(),
                 _ => Vec::new(),
             }
@@ -667,7 +731,11 @@ impl AddUi {
                 p.selected = 0;
                 return AddIntent::None;
             }
-            Overlay::MediaPath { input, completions, selected } => {
+            Overlay::MediaPath {
+                input,
+                completions,
+                selected,
+            } => {
                 input.insert_str(text);
                 *completions = media::complete_path(input.text());
                 *selected = 0;
@@ -683,7 +751,10 @@ impl AddUi {
             Focus::Field(i) => {
                 let paths = media::detect_paths(text);
                 if !paths.is_empty() {
-                    self.overlay = Overlay::PasteOffer { paths, text: text.to_owned() };
+                    self.overlay = Overlay::PasteOffer {
+                        paths,
+                        text: text.to_owned(),
+                    };
                 } else {
                     self.form.fields[i].area.paste(text);
                     self.after_edit(b);
@@ -772,7 +843,8 @@ impl AddUi {
         let popup_open = !self.tag_popup.items.is_empty();
         match key.code {
             KeyCode::Down if popup_open => {
-                self.tag_popup.selected = (self.tag_popup.selected + 1) % self.tag_popup.items.len();
+                self.tag_popup.selected =
+                    (self.tag_popup.selected + 1) % self.tag_popup.items.len();
             }
             KeyCode::Up if popup_open => {
                 let n = self.tag_popup.items.len();
@@ -859,7 +931,11 @@ impl AddUi {
                 if self.preview_on {
                     let n = self.preview_ords(b).len();
                     let idx = self.form.preview_idx;
-                    self.form.preview_idx = if c == ']' { (idx + 1) % n } else { (idx + n - 1) % n };
+                    self.form.preview_idx = if c == ']' {
+                        (idx + 1) % n
+                    } else {
+                        (idx + n - 1) % n
+                    };
                     self.refresh_preview(b);
                 }
                 Some(AddIntent::None)
@@ -956,7 +1032,14 @@ impl AddUi {
 
     fn persist_sticky(&mut self, b: &dyn Backend, ord: usize, sticky: bool) -> bool {
         let id = self.form.notetype.id;
-        match run(b, NoteCommand::SetSticky { notetype_id: id, field_ord: ord as u32, sticky }) {
+        match run(
+            b,
+            NoteCommand::SetSticky {
+                notetype_id: id,
+                field_ord: ord as u32,
+                sticky,
+            },
+        ) {
             Ok(_) => {
                 self.form.fields[ord].info.sticky = sticky;
                 if let Some(nt) = self.notetypes.iter_mut().find(|n| n.id == id) {
@@ -996,7 +1079,9 @@ impl AddUi {
     // ---- media ---------------------------------------------------------------------------
 
     fn insert_media(&mut self, b: &dyn Backend, command: NoteCommand) {
-        let Focus::Field(i) = self.form.focus else { return };
+        let Focus::Field(i) = self.form.focus else {
+            return;
+        };
         match run(b, command) {
             Ok(EditResponse::Media(m)) => {
                 self.form.fields[i].area.insert_at_cursor(&m.field_text);
@@ -1012,7 +1097,10 @@ impl AddUi {
         match (self.clipboard)() {
             Ok(data) => self.insert_media(
                 b,
-                NoteCommand::AddMedia { desired_name: media::clipboard_name(), data },
+                NoteCommand::AddMedia {
+                    desired_name: media::clipboard_name(),
+                    data,
+                },
             ),
             Err(e) => self.set_error(e),
         }
@@ -1020,12 +1108,19 @@ impl AddUi {
 
     fn attach_text(&mut self, b: &dyn Backend, text: &str) {
         let text = text.trim();
-        if text.starts_with("http://") || text.starts_with("https://") || text.starts_with("file://")
+        if text.starts_with("http://")
+            || text.starts_with("https://")
+            || text.starts_with("file://")
         {
             if let Some(path) = media::detect_paths(text).first() {
                 self.insert_media(b, NoteCommand::AddMediaFromPath { path: path.clone() });
             } else {
-                self.insert_media(b, NoteCommand::AddMediaFromUrl { url: text.to_owned() });
+                self.insert_media(
+                    b,
+                    NoteCommand::AddMediaFromUrl {
+                        url: text.to_owned(),
+                    },
+                );
             }
         } else if !text.is_empty() {
             let path = media::detect_paths(text)
@@ -1049,7 +1144,10 @@ impl AddUi {
         let (title, items) = match kind {
             PickerKind::Notetype => (
                 "Note type",
-                self.notetypes.iter().map(|n| (n.id, n.name.clone())).collect::<Vec<_>>(),
+                self.notetypes
+                    .iter()
+                    .map(|n| (n.id, n.name.clone()))
+                    .collect::<Vec<_>>(),
             ),
             PickerKind::Deck => ("Deck", self.decks.clone()),
         };
@@ -1058,7 +1156,12 @@ impl AddUi {
             PickerKind::Deck => self.form.deck_id,
         };
         let selected = items.iter().position(|(id, _)| *id == current).unwrap_or(0);
-        let mut picker = Picker { title, items, query: TextInput::default(), selected: 0 };
+        let mut picker = Picker {
+            title,
+            items,
+            query: TextInput::default(),
+            selected: 0,
+        };
         picker.selected = selected;
         self.overlay = Overlay::Picker(kind, picker);
         AddIntent::None
@@ -1075,7 +1178,9 @@ impl AddUi {
                     KeyCode::Up => p.selected = p.selected.saturating_sub(1),
                     KeyCode::Down => p.selected = (p.selected + 1).min(n.saturating_sub(1)),
                     KeyCode::Char('p') if ctrl => p.selected = p.selected.saturating_sub(1),
-                    KeyCode::Char('n') if ctrl => p.selected = (p.selected + 1).min(n.saturating_sub(1)),
+                    KeyCode::Char('n') if ctrl => {
+                        p.selected = (p.selected + 1).min(n.saturating_sub(1))
+                    }
                     KeyCode::Enter => {
                         let matches = p.matches();
                         if let Some(&idx) = matches.get(p.selected.min(n.saturating_sub(1))) {
@@ -1139,7 +1244,11 @@ impl AddUi {
                 self.overlay = Overlay::Colour(sel);
                 AddIntent::None
             }
-            Overlay::MediaPath { mut input, mut completions, mut selected } => {
+            Overlay::MediaPath {
+                mut input,
+                mut completions,
+                mut selected,
+            } => {
                 match key.code {
                     KeyCode::Esc => return AddIntent::None,
                     KeyCode::Enter => {
@@ -1167,7 +1276,11 @@ impl AddUi {
                         }
                     }
                 }
-                self.overlay = Overlay::MediaPath { input, completions, selected };
+                self.overlay = Overlay::MediaPath {
+                    input,
+                    completions,
+                    selected,
+                };
                 AddIntent::None
             }
             Overlay::PasteOffer { paths, text } => {
@@ -1237,7 +1350,12 @@ impl AddUi {
         if new.image_occlusion {
             return self.set_error(IO_REFUSED);
         }
-        let old_names: Vec<String> = self.form.fields.iter().map(|f| f.info.name.clone()).collect();
+        let old_names: Vec<String> = self
+            .form
+            .fields
+            .iter()
+            .map(|f| f.info.name.clone())
+            .collect();
         let new_names: Vec<String> = new.fields.iter().map(|f| f.name.clone()).collect();
         let values = carry_fields(&old_names, &self.form.values(), &new_names);
         let tags = self.form.tags.text().to_owned();
@@ -1346,7 +1464,13 @@ impl AddUi {
     fn do_add(&mut self, b: &dyn Backend) -> AddIntent {
         let note = self.form.note_data();
         let deck_id = self.form.deck_id;
-        let (id, changes) = match run(b, NoteCommand::AddNote { note: note.clone(), deck_id }) {
+        let (id, changes) = match run(
+            b,
+            NoteCommand::AddNote {
+                note: note.clone(),
+                deck_id,
+            },
+        ) {
             Ok(EditResponse::NoteAdded { id, changes }) => (id, changes),
             Ok(other) => {
                 self.set_error(format!("Unexpected response: {other:?}"));
@@ -1357,19 +1481,43 @@ impl AddUi {
                 return AddIntent::None;
             }
         };
-        let joined = note.fields.join(", ");
-        let label = match run(b, NoteCommand::HtmlToText { html: joined.clone(), preserve_media_filenames: true }) {
+        let joined = note
+            .fields
+            .iter()
+            .filter(|f| !is_blank(f))
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        let label = match run(
+            b,
+            NoteCommand::HtmlToText {
+                html: joined.clone(),
+                preserve_media_filenames: true,
+            },
+        ) {
             Ok(EditResponse::Text(t)) => t,
             _ => joined,
         };
-        self.history.insert(0, HistoryEntry { note_id: id, label: truncate_label(&label) });
+        self.history.insert(
+            0,
+            HistoryEntry {
+                note_id: id,
+                label: truncate_label(&label),
+            },
+        );
         self.history.truncate(HISTORY_LIMIT);
         // New blank note: sticky fields and the tags stay.
         let values: Vec<String> = self
             .form
             .fields
             .iter()
-            .map(|f| if f.info.sticky { f.area.value().to_owned() } else { String::new() })
+            .map(|f| {
+                if f.info.sticky {
+                    f.area.value().to_owned()
+                } else {
+                    String::new()
+                }
+            })
             .collect();
         let tags = self.form.tags.text().to_owned();
         let mut form = Form::new(self.form.notetype.clone(), deck_id, values);
@@ -1404,7 +1552,12 @@ impl AddUi {
             fields,
             tags,
         };
-        match run(b, NoteCommand::UpdateNotes { updates: vec![update] }) {
+        match run(
+            b,
+            NoteCommand::UpdateNotes {
+                updates: vec![update],
+            },
+        ) {
             Ok(EditResponse::Updated(report)) => {
                 if !report.conflicts.is_empty() || !report.missing.is_empty() {
                     self.overlay = Overlay::Conflict {
@@ -1448,8 +1601,12 @@ impl AddUi {
             }
             if changes.notetype {
                 if let Ok(nt) = fetch_notetype(b, self.form.notetype.id) {
-                    let old: Vec<String> =
-                        self.form.fields.iter().map(|f| f.info.name.clone()).collect();
+                    let old: Vec<String> = self
+                        .form
+                        .fields
+                        .iter()
+                        .map(|f| f.info.name.clone())
+                        .collect();
                     let new: Vec<String> = nt.fields.iter().map(|f| f.name.clone()).collect();
                     if old != new {
                         let values = carry_fields(&old, &self.form.values(), &new);
@@ -1480,7 +1637,9 @@ impl AddUi {
                 let mtime = t.mtime;
                 match fetch_note(b, id) {
                     Ok(n) if n.mtime_secs != mtime => {
-                        self.set_error("This note was changed elsewhere; saving will report a conflict");
+                        self.set_error(
+                            "This note was changed elsewhere; saving will report a conflict",
+                        );
                     }
                     Err(_) => self.set_error("This note was deleted elsewhere"),
                     _ => {}

@@ -46,11 +46,13 @@ pub(super) fn draw(ui: &AddUi, area: Rect, buf: &mut Buffer, renderer: &dyn Card
     let (form_area, preview_area) = if ui.preview_on {
         if area.width >= 100 {
             let [l, r] =
-                Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)]).areas(area);
+                Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
+                    .areas(area);
             (l, Some(r))
         } else {
             let [t, bottom] =
-                Layout::vertical([Constraint::Percentage(60), Constraint::Percentage(40)]).areas(area);
+                Layout::vertical([Constraint::Percentage(60), Constraint::Percentage(40)])
+                    .areas(area);
             (t, Some(bottom))
         }
     } else {
@@ -83,7 +85,10 @@ fn draw_form(ui: &AddUi, area: Rect, buf: &mut Buffer) {
                 .iter()
                 .find(|(id, _)| *id == form.deck_id)
                 .map_or("?", |(_, n)| n.as_str());
-            format!("Add · Type: {} (Ctrl+N) · Deck: {} (Ctrl+D)", form.notetype.name, deck)
+            format!(
+                "Add · Type: {} (Ctrl+N) · Deck: {} (Ctrl+D)",
+                form.notetype.name, deck
+            )
         }
     };
     put(buf, header.x, header.y, header.width, &title, bold());
@@ -93,9 +98,23 @@ fn draw_form(ui: &AddUi, area: Rect, buf: &mut Buffer) {
     // Tags.
     let tags_focused = form.focus == Focus::Tags;
     let label_style = if tags_focused { bold() } else { dim() };
-    put(buf, tags_area.x, tags_area.y, tags_area.width, "Tags", label_style);
+    put(
+        buf,
+        tags_area.x,
+        tags_area.y,
+        tags_area.width,
+        "Tags",
+        label_style,
+    );
     let input_y = tags_area.y + 1;
-    put(buf, tags_area.x, input_y, tags_area.width, form.tags.text(), Style::default());
+    put(
+        buf,
+        tags_area.x,
+        input_y,
+        tags_area.width,
+        form.tags.text(),
+        Style::default(),
+    );
     if tags_focused {
         let col = (form.tags.cursor_column() as u16).min(tags_area.width.saturating_sub(1));
         let cell = &mut buf[(tags_area.x + col, input_y)];
@@ -112,10 +131,7 @@ fn draw_form(ui: &AddUi, area: Rect, buf: &mut Buffer) {
             "Duplicate: another note has the same first field (adding is allowed)".into(),
             yellow(),
         ),
-        FieldsCheck::MissingCloze => (
-            "No cloze deletion yet (adding will ask)".into(),
-            yellow(),
-        ),
+        FieldsCheck::MissingCloze => ("No cloze deletion yet (adding will ask)".into(), yellow()),
         FieldsCheck::NotetypeNotCloze => (
             "Cloze deletion in a note type that is not a cloze type (adding is blocked)".into(),
             red(),
@@ -125,7 +141,14 @@ fn draw_form(ui: &AddUi, area: Rect, buf: &mut Buffer) {
             red(),
         ),
     };
-    put(buf, check_area.x, check_area.y, check_area.width, &text, style);
+    put(
+        buf,
+        check_area.x,
+        check_area.y,
+        check_area.width,
+        &text,
+        style,
+    );
     if let Some(s) = &ui.status {
         put(
             buf,
@@ -191,7 +214,11 @@ fn draw_fields(ui: &AddUi, area: Rect, buf: &mut Buffer) {
         if f.info.collapsed && !focused {
             label.push_str(" (collapsed)");
         }
-        let style = if focused { bold().add_modifier(Modifier::UNDERLINED) } else { dim() };
+        let style = if focused {
+            bold().add_modifier(Modifier::UNDERLINED)
+        } else {
+            dim()
+        };
         put(buf, area.x, y, area.width, &label, style);
         y += 1;
         let h = heights[i].min(bottom - y);
@@ -217,7 +244,9 @@ fn draw_tag_popup(ui: &AddUi, fields_area: Rect, buf: &mut Buffer) {
         .min(fields_area.width);
     let rect = Rect::new(
         fields_area.x,
-        (fields_area.y + fields_area.height).saturating_sub(h + 1).max(fields_area.y),
+        (fields_area.y + fields_area.height)
+            .saturating_sub(h + 1)
+            .max(fields_area.y),
         w,
         h.min(fields_area.height),
     );
@@ -228,7 +257,14 @@ fn draw_tag_popup(ui: &AddUi, fields_area: Rect, buf: &mut Buffer) {
         } else {
             Style::default()
         };
-        put(buf, rect.x, rect.y + i as u16, rect.width, &format!(" {item} "), style);
+        put(
+            buf,
+            rect.x,
+            rect.y + i as u16,
+            rect.width,
+            &format!(" {item} "),
+            style,
+        );
     }
 }
 
@@ -243,15 +279,22 @@ fn draw_preview(ui: &AddUi, area: Rect, buf: &mut Buffer, renderer: &dyn CardRen
         None => put(buf, inner.x, inner.y, inner.width, "Rendering…", dim()),
         Some(Err(e)) => put(buf, inner.x, inner.y, inner.width, e, red()),
         Some(Ok(card)) => {
-            let [q, a] =
-                Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(inner);
+            let [q, a] = Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .areas(inner);
             for (title, html, rect) in
                 [("Question", &card.question, q), ("Answer", &card.answer, a)]
             {
                 if rect.height < 2 {
                     continue;
                 }
-                put(buf, rect.x, rect.y, rect.width, &format!("── {title} ──"), dim());
+                put(
+                    buf,
+                    rect.x,
+                    rect.y,
+                    rect.width,
+                    &format!("── {title} ──"),
+                    dim(),
+                );
                 let body = Rect::new(rect.x, rect.y + 1, rect.width, rect.height - 1);
                 let side = card_side(card, html.clone(), &ui.media_dir, ui.night_mode);
                 let options = RenderOptions {
@@ -270,7 +313,9 @@ fn draw_preview(ui: &AddUi, area: Rect, buf: &mut Buffer, renderer: &dyn CardRen
 fn boxed(buf: &mut Buffer, area: Rect, title: &str, height: u16, width: u16) -> Rect {
     let rect = centered(area, width, height);
     Clear.render(rect, buf);
-    let block = Block::default().borders(Borders::ALL).title(format!(" {title} "));
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" {title} "));
     let inner = block.inner(rect);
     block.render(rect, buf);
     inner
@@ -284,63 +329,185 @@ fn draw_overlay(ui: &AddUi, area: Rect, buf: &mut Buffer) {
             let matches = p.matches();
             let h = (matches.len().min(10) as u16) + 3;
             let inner = boxed(buf, area, p.title, h, 50);
-            put(buf, inner.x, inner.y, inner.width, &format!("> {}", p.query.text()), Style::default());
+            put(
+                buf,
+                inner.x,
+                inner.y,
+                inner.width,
+                &format!("> {}", p.query.text()),
+                Style::default(),
+            );
             let selected = p.selected.min(matches.len().saturating_sub(1));
             let skip = selected.saturating_sub(9);
             for (row, &idx) in matches.iter().skip(skip).take(10).enumerate() {
-                let style = if skip + row == selected { sel } else { Style::default() };
-                put(buf, inner.x, inner.y + 1 + row as u16, inner.width, &p.items[idx].1, style);
+                let style = if skip + row == selected {
+                    sel
+                } else {
+                    Style::default()
+                };
+                put(
+                    buf,
+                    inner.x,
+                    inner.y + 1 + row as u16,
+                    inner.width,
+                    &p.items[idx].1,
+                    style,
+                );
             }
         }
         Overlay::History(selected) => {
             let h = ui.history.len().min(15) as u16 + 2;
             let inner = boxed(buf, area, "History of added notes", h, 56);
             for (row, e) in ui.history.iter().enumerate().take(inner.height as usize) {
-                let style = if row == *selected { sel } else { Style::default() };
-                put(buf, inner.x, inner.y + row as u16, inner.width, &e.label, style);
+                let style = if row == *selected {
+                    sel
+                } else {
+                    Style::default()
+                };
+                put(
+                    buf,
+                    inner.x,
+                    inner.y + row as u16,
+                    inner.width,
+                    &e.label,
+                    style,
+                );
             }
         }
         Overlay::Colour(selected) => {
             let inner = boxed(buf, area, "Text colour", PALETTE.len() as u16 + 2, 24);
             for (row, (name, (r, g, b))) in PALETTE.iter().enumerate() {
-                let style = if row == *selected { sel } else { Style::default() };
+                let style = if row == *selected {
+                    sel
+                } else {
+                    Style::default()
+                };
                 let line = format!("{} {name}", row + 1);
-                put(buf, inner.x, inner.y + row as u16, inner.width, &line, style);
-                let swatch = Rect::new(inner.x + inner.width.saturating_sub(2), inner.y + row as u16, 2, 1);
+                put(
+                    buf,
+                    inner.x,
+                    inner.y + row as u16,
+                    inner.width,
+                    &line,
+                    style,
+                );
+                let swatch = Rect::new(
+                    inner.x + inner.width.saturating_sub(2),
+                    inner.y + row as u16,
+                    2,
+                    1,
+                );
                 for x in swatch.left()..swatch.right() {
                     buf[(x, swatch.y)].set_bg(Color::Rgb(*r, *g, *b));
                 }
             }
         }
-        Overlay::MediaPath { input, completions, selected } => {
+        Overlay::MediaPath {
+            input,
+            completions,
+            selected,
+        } => {
             let h = completions.len().min(8) as u16 + 4;
             let inner = boxed(buf, area, "Attach file or URL", h, 64);
-            put(buf, inner.x, inner.y, inner.width, &format!("> {}", input.text()), Style::default());
+            put(
+                buf,
+                inner.x,
+                inner.y,
+                inner.width,
+                &format!("> {}", input.text()),
+                Style::default(),
+            );
             for (row, c) in completions.iter().take(8).enumerate() {
                 let style = if row == *selected { sel } else { dim() };
-                put(buf, inner.x, inner.y + 1 + row as u16, inner.width, c, style);
+                put(
+                    buf,
+                    inner.x,
+                    inner.y + 1 + row as u16,
+                    inner.width,
+                    c,
+                    style,
+                );
             }
         }
         Overlay::PasteOffer { paths, .. } => {
             let inner = boxed(buf, area, "Attach file?", 6, 64);
-            put(buf, inner.x, inner.y, inner.width, "The pasted text is a file path:", Style::default());
-            let first = paths.first().map(|p| p.display().to_string()).unwrap_or_default();
+            put(
+                buf,
+                inner.x,
+                inner.y,
+                inner.width,
+                "The pasted text is a file path:",
+                Style::default(),
+            );
+            let first = paths
+                .first()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
             put(buf, inner.x, inner.y + 1, inner.width, &first, bold());
             if paths.len() > 1 {
-                put(buf, inner.x, inner.y + 2, inner.width, &format!("and {} more", paths.len() - 1), dim());
+                put(
+                    buf,
+                    inner.x,
+                    inner.y + 2,
+                    inner.width,
+                    &format!("and {} more", paths.len() - 1),
+                    dim(),
+                );
             }
-            put(buf, inner.x, inner.y + 3, inner.width, "Enter: attach   n: paste as text", dim());
+            put(
+                buf,
+                inner.x,
+                inner.y + 3,
+                inner.width,
+                "Enter: attach   n: paste as text",
+                dim(),
+            );
         }
         Overlay::ConfirmDiscard => {
             let inner = boxed(buf, area, "Discard?", 4, 40);
-            put(buf, inner.x, inner.y, inner.width, "Discard current input?", Style::default());
-            put(buf, inner.x, inner.y + 1, inner.width, "y: discard   n: keep editing", dim());
+            put(
+                buf,
+                inner.x,
+                inner.y,
+                inner.width,
+                "Discard current input?",
+                Style::default(),
+            );
+            put(
+                buf,
+                inner.x,
+                inner.y + 1,
+                inner.width,
+                "y: discard   n: keep editing",
+                dim(),
+            );
         }
         Overlay::ConfirmCloze => {
             let inner = boxed(buf, area, "No cloze deletions", 5, 56);
-            put(buf, inner.x, inner.y, inner.width, "You have a cloze note type but have not", Style::default());
-            put(buf, inner.x, inner.y + 1, inner.width, "made any cloze deletions. Proceed?", Style::default());
-            put(buf, inner.x, inner.y + 2, inner.width, "y: add anyway   n: keep editing", dim());
+            put(
+                buf,
+                inner.x,
+                inner.y,
+                inner.width,
+                "You have a cloze note type but have not",
+                Style::default(),
+            );
+            put(
+                buf,
+                inner.x,
+                inner.y + 1,
+                inner.width,
+                "made any cloze deletions. Proceed?",
+                Style::default(),
+            );
+            put(
+                buf,
+                inner.x,
+                inner.y + 2,
+                inner.width,
+                "y: add anyway   n: keep editing",
+                dim(),
+            );
         }
         Overlay::Conflict { missing, .. } => {
             let inner = boxed(buf, area, "Note changed", 6, 60);
@@ -350,8 +517,22 @@ fn draw_overlay(ui: &AddUi, area: Rect, buf: &mut Buffer) {
                 "This note was deleted elsewhere."
             };
             put(buf, inner.x, inner.y, inner.width, msg, red());
-            put(buf, inner.x, inner.y + 1, inner.width, "Nothing was saved.", Style::default());
-            put(buf, inner.x, inner.y + 3, inner.width, "r: reload the note   Esc: keep editing", dim());
+            put(
+                buf,
+                inner.x,
+                inner.y + 1,
+                inner.width,
+                "Nothing was saved.",
+                Style::default(),
+            );
+            put(
+                buf,
+                inner.x,
+                inner.y + 3,
+                inner.width,
+                "r: reload the note   Esc: keep editing",
+                dim(),
+            );
         }
     }
 }
