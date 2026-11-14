@@ -51,7 +51,7 @@ impl std::error::Error for PackageError {}
 
 fn core_error(error: CoreError) -> PackageError {
     let code = match error {
-        CoreError::Locked => EXIT_LOCKED,
+        CoreError::Locked | CoreError::InUse(_) => EXIT_LOCKED,
         CoreError::SchemaChangeRequired => EXIT_SCHEMA_CHANGE,
         CoreError::ProfileBusy(_) => EXIT_PROFILE_BUSY,
         CoreError::Interrupted => EXIT_CANCELLED,
@@ -781,7 +781,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs lead actor interception"]
     fn backup_create_list_and_restore() {
         let (dir, actor) = fixture();
         let never = &mut || -> std::io::Result<String> { panic!("must not prompt") };
@@ -820,7 +819,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs lead actor interception"]
     fn colpkg_export_through_the_cli() {
         let (_dir, actor) = fixture();
         let out = tempfile::tempdir().unwrap();
