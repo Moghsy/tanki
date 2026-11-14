@@ -1,16 +1,16 @@
 //! Collection actor, study commands and adapters to the pinned Anki core.
 
 mod actor;
-mod data;
-#[doc(hidden)]
-pub mod sync_ops;
 pub mod config;
+mod data;
+mod fixture;
 #[doc(hidden)]
 pub mod packages;
-mod fixture;
 mod safety;
 mod study;
 mod sync;
+#[doc(hidden)]
+pub mod sync_ops;
 mod types;
 pub use actor::CollectionActor;
 pub use data::*;
@@ -20,6 +20,20 @@ pub use types::*;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn schema_change_needs_confirmation_unless_full_sync_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut col = anki::collection::CollectionBuilder::new(dir.path().join("c.anki2"))
+            .build()
+            .unwrap();
+        assert_eq!(
+            crate::actor::confirm_schema_change(&mut col, false),
+            Err(crate::CoreError::SchemaChangeRequired)
+        );
+        assert_eq!(crate::actor::confirm_schema_change(&mut col, true), Ok(()));
+        col.close(None).unwrap();
+    }
+
     #[test]
     fn patched_progress_is_typed_and_cancellable() {
         let state = std::sync::Arc::new(std::sync::Mutex::new(

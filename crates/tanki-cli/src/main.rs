@@ -1,3 +1,6 @@
+mod package_commands;
+mod sync_commands;
+
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 use tanki_core::{CollectionActor, Command, CoreError, Deck, Response};

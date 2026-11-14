@@ -7,8 +7,10 @@ pub mod fuzzy;
 pub mod input;
 pub mod keymap;
 pub mod links;
+pub mod package_ui;
 pub mod reviewer;
 pub mod services;
+pub mod sync_ui;
 pub mod terminal;
 mod ui;
 

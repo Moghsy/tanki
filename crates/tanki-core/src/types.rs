@@ -9,6 +9,13 @@ pub enum CoreError {
     Invalid(String),
     Other(String),
     ActorStopped,
+    /// The operation would force a one-way full sync; repeat it confirmed.
+    SchemaChangeRequired,
+    /// A desktop session may still own the profile (WAL file or `/proc`
+    /// holder). The text says why and how to proceed.
+    ProfileBusy(String),
+    /// Cancelled through `CollectionActor::cancel_operation`.
+    Interrupted,
 }
 impl std::fmt::Display for CoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -22,6 +29,11 @@ impl std::fmt::Display for CoreError {
             ),
             Self::UnsafePath(s) | Self::Invalid(s) | Self::Other(s) => f.write_str(s),
             Self::ActorStopped => f.write_str("Collection actor stopped"),
+            Self::SchemaChangeRequired => f.write_str(
+                "This change will require a one-way full sync (upload) on the next sync. Confirm to continue.",
+            ),
+            Self::ProfileBusy(s) => f.write_str(s),
+            Self::Interrupted => f.write_str("Operation cancelled"),
         }
     }
 }

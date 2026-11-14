@@ -145,6 +145,7 @@ impl From<anki::error::AnkiError> for CoreError {
             {
                 Self::Locked
             }
+            anki::error::AnkiError::Interrupted => Self::Interrupted,
             _ => Self::Other(e.to_string()),
         }
     }
@@ -199,6 +200,21 @@ fn backup_and_relock(mut col: Collection, profile: &Path) -> Result<(Collection,
     }
     col.close(None)?;
     Ok((open_collection(profile)?, saved.map(|_| ())))
+}
+/// Guard for every operation that can mark the schema modified (PLAN 8.9).
+///
+/// Anki's core sets the flag silently; desktop asks first. This is
+/// conservative: unless a one-way full sync is already pending, an
+/// unconfirmed call fails with `SchemaChangeRequired`, including on
+/// collections that never synced (the library cannot tell those apart from
+/// clean ones without private timestamps). Reads only; no SQL.
+#[allow(dead_code)] // Callers arrive with the Packages stream.
+pub(crate) fn confirm_schema_change(col: &mut Collection, confirmed: bool) -> Result<()> {
+    use anki_proto::sync::sync_status_response::Required;
+    if confirmed || col.sync_status_offline()? == Required::FullSync {
+        return Ok(());
+    }
+    Err(CoreError::SchemaChangeRequired)
 }
 pub(crate) fn changes(c: pb::collection::OpChanges) -> OpChanges {
     OpChanges {

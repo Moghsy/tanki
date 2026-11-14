@@ -92,3 +92,26 @@ and `run_import`, `run_export`, `run_backup`, each taking
 TUI owns a self-contained package operation widget/state over core commands;
 report its integration API. Destructive restore is explicit and confirmed;
 ordinary import never silently replaces a collection because of a filename.
+
+## Additions before fan-out (lead, 2026-11-14)
+
+- `CoreError` gains `SchemaChangeRequired`, `ProfileBusy(String)` (WAL or
+  `/proc` refusal) and `Interrupted` (`AnkiError::Interrupted` maps to it).
+- `actor::confirm_schema_change(col, confirmed)` exists and is tested. It uses
+  only the public `Collection::sync_status_offline`; unless a full sync is
+  already pending, an unconfirmed call fails with `SchemaChangeRequired`.
+- Dependencies added by the lead: `toml` 0.9 (tanki-core, for `config.rs`) and
+  `rpassword` 7 (tanki-cli, password prompt). Ask the lead for anything else.
+- Credentials: 0600 file in the config folder only. The OS keyring is deferred
+  (it pulls in D-Bus); recorded as a plan deviation.
+- Stream files exist as stubs with their modules already declared:
+  `tanki-cli/src/{sync_commands,package_commands}.rs` (`mod` in `main.rs`) and
+  `tanki-tui/src/{sync_ui,package_ui}.rs` (`pub mod` in `lib.rs`). Streams
+  fill these files; they do not edit `main.rs` or `lib.rs`.
+- The Phase 2 exit test (Python client and tanki client sharing one in-process
+  server) belongs to the Sync stream: `tanki-core/tests/sync_interop.rs` and
+  `scripts/sync-interop.py`, skipping unless `TANKI_PINNED_PYTHON` and
+  `TANKI_PINNED_PYTHONPATH` are set, as `study_replay.rs` does.
+- Worktrees hold their own local clone of the pinned Anki checkout at
+  `vendor/anki` with patch 0001 applied. Never stage `vendor/anki`; stage
+  files by name.
