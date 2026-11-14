@@ -174,8 +174,8 @@ Errors with their own exit code use `NoteCliError { message, code }`;
 
 ## Manual check (user)
 
-On a fixture: `mkdir /tmp/t && cargo xtask study-fixtures --base /tmp/t`,
-then `tanki --base /tmp/t --profile tanki-fixture`:
+On a fixture: `mkdir -p /tmp/t && cargo run -p xtask --features fixtures -- study-fixtures --base /tmp/t`,
+then `./target/debug/tanki --base /tmp/t --profile tanki-fixture`:
 
 1. `a` on the deck list: type a Basic note, tags complete while typing,
    Alt+P shows the preview, Ctrl+S (or Alt+Enter) adds it.
