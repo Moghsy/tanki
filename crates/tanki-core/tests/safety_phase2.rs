@@ -414,25 +414,22 @@ fn restore_while_another_process_holds_the_file_is_refused() -> Result<()> {
         .unwrap();
     let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
     assert!(lines.any(|l| l.unwrap().trim_end().ends_with("ready")));
+    let pid = child.id().to_string();
     let result = actor
         .start_data(DataCommand::Package(PackageCommand::Restore {
             path: package,
             confirmed: true,
-        }))?
-        .wait();
-    match result {
-        Err(CoreError::InUse(message)) => {
-            assert!(message.contains(&child.id().to_string()), "{message}")
-        }
-        other => panic!("expected InUse, got {other:?}"),
-    }
+        }))
+        .and_then(|pending| pending.wait());
     // The actor stopped instead of reopening beside the other process.
-    assert!(matches!(
-        actor.execute(Command::DeckTree),
-        Err(CoreError::ActorStopped)
-    ));
+    let after = actor.execute(Command::DeckTree);
     let _ = actor.close();
     release(child);
+    match result {
+        Err(CoreError::InUse(message)) => assert!(message.contains(&pid), "{message}"),
+        other => panic!("expected InUse, got {other:?}"),
+    }
+    assert!(matches!(after, Err(CoreError::ActorStopped)));
     let actor = CollectionActor::open(&profile)?;
     assert_eq!(note_count(&actor)?, 1, "the live collection was not replaced");
     actor.close()
