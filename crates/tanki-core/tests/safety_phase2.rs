@@ -181,6 +181,17 @@ fn unconfirmed_restore_is_refused_and_export_cannot_overwrite_the_profile() -> R
         confirmed: false,
     }))?;
     assert!(matches!(restore.wait(), Err(CoreError::Invalid(_))));
+    let apkg = actor.start_data(DataCommand::Package(PackageCommand::Restore {
+        path: dir.path().join("deck.apkg"),
+        confirmed: true,
+    }))?;
+    assert!(matches!(apkg.wait(), Err(CoreError::Invalid(m)) if m.contains(".colpkg")));
+    let legacy = actor.start_data(DataCommand::Package(PackageCommand::ExportCollection {
+        path: dir.path().join("../legacy.colpkg"),
+        media: false,
+        legacy: true,
+    }))?;
+    assert!(legacy.wait().is_err());
     for name in [
         "collection.anki2",
         "collection.anki2-wal",

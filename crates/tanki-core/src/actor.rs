@@ -449,6 +449,17 @@ fn owned_data(
             if let Err(error) = safety::check_output_path(profile, &path) {
                 return (Ok(col), Err(error));
             }
+            // Anki would close the live collection downgraded to schema 11,
+            // leaving it upgradable by any old client until tanki reopens it.
+            if legacy {
+                return (
+                    Ok(col),
+                    Err(CoreError::Invalid(
+                        "Legacy collection packages are not supported; use a normal .colpkg."
+                            .into(),
+                    )),
+                );
+            }
             reopen(
                 packages::export_collection(col, &path, media, legacy).map(|()| DataResponse::Done),
             )
@@ -459,6 +470,19 @@ fn owned_data(
                     Ok(col),
                     Err(CoreError::Invalid(
                         "Restoring replaces the whole collection; confirm to continue.".into(),
+                    )),
+                );
+            }
+            // An .apkg unpacks just as well and would replace the collection
+            // with a single deck.
+            if !path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("colpkg"))
+            {
+                return (
+                    Ok(col),
+                    Err(CoreError::Invalid(
+                        "Only a .colpkg file can replace the collection.".into(),
                     )),
                 );
             }
