@@ -9,7 +9,7 @@ use crate::keymap::{Action, Chord};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::path::{Path, PathBuf};
 use tanki_core::{
-    config::{Config, EditorSettings},
+    config::Config,
     notefile::{self, FileNote},
     OpChanges,
 };
@@ -47,7 +47,7 @@ impl App<'_> {
     fn editor_command(&self) -> Vec<String> {
         self.load_config()
             .map(|c| c.editor)
-            .unwrap_or_else(EditorSettings::default)
+            .unwrap_or_default()
             .resolve()
     }
 
@@ -206,7 +206,10 @@ impl App<'_> {
         match intent {
             AddIntent::None => {}
             AddIntent::Close => self.pop_layer(),
-            AddIntent::Changed(changes) => self.changes_below(&changes),
+            AddIntent::Changed(changes) => {
+                self.changes_below(&changes);
+                self.load_totals();
+            }
             AddIntent::Saved(changes) => {
                 self.pop_layer();
                 // The edited note may be the reviewer's card: show it again.
@@ -215,6 +218,7 @@ impl App<'_> {
                     ..changes
                 };
                 self.changes_below(&changes);
+                self.load_totals();
                 self.notice("Note saved.");
             }
             AddIntent::Message(text) => self.notice(text),
