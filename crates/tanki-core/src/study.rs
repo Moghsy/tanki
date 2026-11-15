@@ -187,6 +187,8 @@ pub(crate) fn queue(col: &mut Collection, limit: u32, cache: &mut StateCache) ->
     )?;
     cache.clear();
     let mut cards = Vec::new();
+    let script = config_string(col, StringKey::CardStateCustomizer)?;
+    let mut custom_scheduling_error = None;
     for c in q.cards {
         let card = c
             .card
@@ -196,6 +198,15 @@ pub(crate) fn queue(col: &mut Collection, limit: u32, cache: &mut StateCache) ->
             .ok_or_else(|| CoreError::Other("Missing scheduling states".into()))?;
         if let Some(current) = states.current.as_mut() {
             current.custom_data = Some(card.custom_data.clone());
+        }
+        if !script.trim().is_empty() {
+            match crate::custom_scheduling::apply(&states, &c.context.unwrap_or_default(), &script)
+            {
+                Ok(updated) => states = updated,
+                Err(error) => {
+                    custom_scheduling_error.get_or_insert(error);
+                }
+            }
         }
         let intervals = SchedulerService::describe_next_states(col, states.clone())?
             .vals
@@ -220,6 +231,7 @@ pub(crate) fn queue(col: &mut Collection, limit: u32, cache: &mut StateCache) ->
         });
     }
     Ok(Queue {
+        custom_scheduling_error,
         new: q.new_count,
         learning: q.learning_count,
         review: q.review_count,
@@ -249,17 +261,27 @@ pub(crate) fn answer(
         Rating::Good => (states.good, R::Good),
         Rating::Easy => (states.easy, R::Easy),
     };
-    let changes = changes(SchedulerService::answer_card(
-        col,
-        pb::scheduler::CardAnswer {
-            card_id,
-            current_state: states.current,
-            new_state: new_state.clone(),
-            rating: rating as i32,
-            answered_at_millis,
-            milliseconds_taken,
-        },
-    )?);
+    let changes = changes(
+        SchedulerService::answer_card(
+            col,
+            pb::scheduler::CardAnswer {
+                card_id,
+                current_state: states.current,
+                new_state: new_state.clone(),
+                rating: rating as i32,
+                answered_at_millis,
+                milliseconds_taken,
+            },
+        )
+        .map_err(|error| match &error {
+            // AnkiError's Display hides InvalidInput's explanation. Preserve the
+            // validation message from custom data when presenting answer failures.
+            anki::error::AnkiError::InvalidInput { .. } => {
+                CoreError::Invalid(plain(error.message(col.tr())))
+            }
+            _ => CoreError::from(error),
+        })?,
+    );
     let leech = match new_state {
         Some(state) => SchedulerService::state_is_leech(col, state)?.val,
         None => false,

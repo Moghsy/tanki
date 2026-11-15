@@ -60,9 +60,20 @@ pub struct SyncSettings {
 #[serde(default)]
 pub struct ProfileConfig {
     pub sync: SyncSettings,
+    /// Explicit renderer choices per note type. These are tanki preferences,
+    /// never collection schema changes.
+    pub render_tiers: BTreeMap<String, RenderTier>,
     /// Browser search history, newest first (desktop keeps 30 in its
     /// profile, R6 §1.5). tanki state, never stored in the collection.
     pub search_history: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RenderTier {
+    #[default]
+    Text,
+    Bitmap,
 }
 
 /// Desktop keeps this many searches (`browser.py`).
@@ -107,6 +118,23 @@ impl EditorSettings {
     }
 }
 
+/// The AnkiConnect-compatible API (PLAN 8.14, Phase 6), `[connect]`.
+/// Defaults follow AnkiConnect: loopback port 8765, no key, origin
+/// `http://localhost`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ConnectSettings {
+    /// Address to bind, `host:port` [default: 127.0.0.1:8765].
+    pub bind: Option<String>,
+    /// When set, every request must carry this `key` (AnkiConnect `apiKey`).
+    pub api_key: Option<String>,
+    /// Extra allowed CORS origins (AnkiConnect `webCorsOriginList`); `*`
+    /// allows any origin.
+    pub cors_origins: Vec<String>,
+    /// Also serve the API while the TUI runs.
+    pub in_tui: bool,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -115,6 +143,7 @@ pub struct Config {
     /// Collections tanki has opened before (the first-open rule, PLAN 4.4).
     pub seen_collections: BTreeSet<String>,
     pub editor: EditorSettings,
+    pub connect: ConnectSettings,
 }
 
 impl Config {

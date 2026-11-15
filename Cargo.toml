@@ -17,8 +17,18 @@ crossterm = "0.29"
 # libchafa stays off (PLAN 4.1 prerequisites); image formats are chosen below.
 ratatui-image = { version = "11.1", default-features = false, features = ["crossterm"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 
 [profile.release]
 strip = true
+
+# Anki + optional rich rendering produce many large test executables. Keep
+# the ordinary cache small; opt into symbols for a specific debugging session.
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.test]
+debug = 0
+incremental = false

@@ -3,13 +3,20 @@
 use crate::add_ui::AddUi;
 use crate::backend::{self, Backend, DeckRow, Tracked};
 use crate::browser_ui::BrowserUi;
+use crate::deck_options_ui::DeckOptionsUi;
+use crate::deck_tools_ui::DeckPromptKind;
+use crate::deck_tools_ui::{CustomStudyUi, DeckDescriptionUi, DeckPromptUi, FilteredDeckUi};
 use crate::editor_flow::{EditorExit, FlowOptions};
 use crate::input::TextInput;
 use crate::keymap::{Action, Chord, Keymap, Scope};
+use crate::notetypes_ui::{ChangeNotetypeUi, NotetypesUi};
 use crate::package_ui::PackageUi;
 use crate::reviewer::{self, Effect, Now, Phase, Reviewer, SCHEDULER_UPGRADE_MESSAGE};
 use crate::services::{self, AudioPlayer, CardRenderer, Display, ImageDisplay};
+use crate::stats_ui::{CardInfoUi, StatsUi};
 use crate::sync_ui::SyncUi;
+use crate::tools_ui::ToolsUi;
+use crate::transfer_ui::{DuplicatesUi, ExportUi, ImportUi};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use std::hash::{Hash, Hasher};
@@ -152,6 +159,30 @@ pub enum ConfirmKind {
 pub enum Layer {
     Add(Box<AddUi>),
     Browser(Box<BrowserUi>),
+    DeckOptions(Box<DeckOptionsUi>),
+    Notetypes(Box<NotetypesUi>),
+    ChangeNotetype(Box<ChangeNotetypeUi>),
+    /// A deck tools dialog, drawn over the layer or screen below.
+    DeckTools(Box<DeckToolsLayer>),
+    Stats(Box<StatsUi>),
+    CardInfo(Box<CardInfoUi>),
+    Tools(Box<ToolsUi>),
+    Transfer(Box<TransferLayer>),
+}
+
+/// CSV / JSON import, text export and find duplicates (PLAN 8.11).
+pub enum TransferLayer {
+    Import(Box<ImportUi>),
+    Export(ExportUi),
+    Duplicates(DuplicatesUi),
+}
+
+/// The deck tools dialogs (PLAN 8.2).
+pub enum DeckToolsLayer {
+    Filtered(FilteredDeckUi),
+    CustomStudy(CustomStudyUi),
+    Prompt(DeckPromptUi),
+    Description(DeckDescriptionUi),
 }
 
 impl Layer {
@@ -159,6 +190,40 @@ impl Layer {
         match self {
             Layer::Add(_) => Scope::Add,
             Layer::Browser(_) => Scope::Browser,
+            _ => Scope::Manage,
+        }
+    }
+
+    /// Drawn as a box over what is below instead of full screen.
+    pub fn is_dialog(&self) -> bool {
+        matches!(self, Layer::DeckTools(_))
+    }
+
+    /// Asks before quitting when this is true.
+    pub fn has_unsaved_input(&self) -> bool {
+        match self {
+            Layer::Add(ui) => ui.has_unsaved_input(),
+            Layer::DeckOptions(ui) => ui.is_dirty(),
+            Layer::Notetypes(ui) => ui.is_dirty(),
+            _ => false,
+        }
+    }
+
+    /// Another part of the app changed the collection.
+    pub fn on_changes(&mut self, backend: &dyn Backend, changes: &OpChanges) {
+        match self {
+            Layer::Add(ui) => ui.on_changes(backend, changes),
+            Layer::Browser(ui) => ui.on_changes(backend, changes),
+            Layer::Notetypes(ui) => ui.on_changes(backend, changes),
+            Layer::Stats(ui) => ui.on_changes(backend, changes),
+            Layer::CardInfo(ui) => {
+                let _ = ui.refresh(backend);
+            }
+            Layer::DeckOptions(_)
+            | Layer::ChangeNotetype(_)
+            | Layer::DeckTools(_)
+            | Layer::Tools(_)
+            | Layer::Transfer(_) => {}
         }
     }
 }
@@ -232,6 +297,13 @@ pub struct App<'a> {
     pub(crate) message: Option<Message>,
     pub(crate) totals: Option<(u32, u32, u32)>,
     pub(crate) current_deck: Option<i64>,
+    /// The reviewer's card shown now and the one before (Previous Card Info).
+    pub(crate) shown_card: Option<i64>,
+    pub(crate) previous_card: Option<i64>,
+    /// The Anki base folder (the Tools screen's profiles).
+    pub(crate) base_dir: Option<PathBuf>,
+    /// Set by the Tools screen: quit and reopen on this profile.
+    pub(crate) switch_to: Option<String>,
     pub(crate) focused: bool,
     pub(crate) quit: bool,
     pub(crate) now: Now,
@@ -241,6 +313,8 @@ pub struct App<'a> {
     full_redraw: bool,
     /// Path of tanki's config.toml; `None` means sync is unavailable.
     config_path: Option<PathBuf>,
+    render_tiers: std::collections::BTreeMap<String, tanki_render::tier::RenderTier>,
+    classified: std::collections::BTreeMap<i64, tanki_render::tier::Classification>,
     pub(crate) sync_ui: SyncUi,
     pub(crate) package_ui: Option<PackageUi>,
     job: Option<data::Job>,
@@ -271,6 +345,10 @@ impl<'a> App<'a> {
             message: None,
             totals: None,
             current_deck: None,
+            shown_card: None,
+            previous_card: None,
+            base_dir: None,
+            switch_to: None,
             focused: true,
             quit: false,
             now,
@@ -279,6 +357,8 @@ impl<'a> App<'a> {
             cleanup: String::new(),
             full_redraw: false,
             config_path: None,
+            render_tiers: Default::default(),
+            classified: Default::default(),
             sync_ui: SyncUi::default(),
             package_ui: None,
             job: None,
@@ -308,7 +388,7 @@ impl<'a> App<'a> {
     }
     pub fn shutdown(&mut self) {
         self.cancel_job();
-        self.services.audio.stop();
+        self.services.audio.shutdown();
         self.clear_images();
     }
     /// Escape sequences the terminal must receive before the next frame
@@ -538,6 +618,13 @@ impl<'a> App<'a> {
                     })
                 }
                 Effect::CardChanged => {
+                    let card = self
+                        .review()
+                        .and_then(|v| v.reviewer.card().map(|c| c.queued.id));
+                    if card != self.shown_card {
+                        self.previous_card = self.shown_card.take();
+                        self.shown_card = card;
+                    }
                     if let Some(view) = self.review() {
                         view.scroll = 0;
                         view.render = None;
@@ -591,6 +678,7 @@ impl<'a> App<'a> {
     fn on_tick(&mut self) {
         let now = self.now;
         self.poll_job();
+        self.tick_layers();
         if let Screen::Review(_) = self.screen {
             // The reviewer waits (no auto advance) under the add / browser.
             if self.overlay.is_none() && self.layers.is_empty() {
@@ -644,16 +732,16 @@ impl<'a> App<'a> {
             return;
         }
         for layer in &mut self.layers {
-            match layer {
-                Layer::Add(ui) => ui.on_changes(&self.backend, changes),
-                Layer::Browser(ui) => ui.on_changes(&self.backend, changes),
-            }
+            layer.on_changes(&self.backend, changes);
         }
         self.changes_below(changes);
     }
 
     /// Refreshes the screen (under any layers) after `changes`.
     pub(crate) fn changes_below(&mut self, changes: &OpChanges) {
+        if changes.notetype {
+            self.classified.clear();
+        }
         match &self.screen {
             Screen::Review(_) => {
                 let changes = changes.clone();
@@ -871,6 +959,7 @@ impl<'a> App<'a> {
                 Action::About => self.overlay = Some(Overlay::About),
                 Action::AddNote => self.open_add(),
                 Action::Browse => self.open_browser(None),
+                Action::NoteTypes => self.open_notetypes(),
                 _ => {}
             }
             return;
@@ -889,6 +978,27 @@ impl<'a> App<'a> {
             }
             Action::Help => self.overlay = Some(Overlay::Help { scroll: 0 }),
             Action::About => self.overlay = Some(Overlay::About),
+            Action::DeckOptions => self.open_deck_options(),
+            Action::NoteTypes => self.open_notetypes(),
+            Action::CreateDeck => self.open_deck_prompt(DeckPromptKind::Add),
+            Action::RenameDeck => self.open_deck_prompt(DeckPromptKind::Rename),
+            Action::MoveDeck => self.open_deck_prompt(DeckPromptKind::Move),
+            Action::DeleteDeck => self.open_deck_prompt(DeckPromptKind::Delete),
+            Action::FilteredDeck => self.open_filtered_deck_new(None),
+            Action::CustomStudy => self.open_custom_study(),
+            Action::RebuildDeck => self.rebuild_or_empty(true),
+            Action::EmptyDeck => self.rebuild_or_empty(false),
+            Action::DeckDescription => self.open_deck_description(),
+            Action::Statistics => self.open_stats(),
+            Action::Tools => self.open_tools(),
+            Action::SharedDecks => self.open_shared_decks(),
+            Action::CardInfo => {
+                let card = self
+                    .review()
+                    .and_then(|v| v.reviewer.card().map(|c| c.queued.id));
+                self.open_card_info(card, false);
+            }
+            Action::PreviousCardInfo => self.open_card_info(self.previous_card, true),
             Action::Palette => {
                 self.overlay = Some(Overlay::Palette {
                     input: TextInput::default(),
@@ -1113,6 +1223,48 @@ impl<'a> App<'a> {
     }
 
     /// Lays out the current side if the cache is stale; returns it.
+    fn cycle_render_tier(&mut self) {
+        use tanki_render::tier::RenderTier;
+        let Screen::Review(view) = &mut self.screen else {
+            return;
+        };
+        let Some(card) = view.reviewer.card() else {
+            return;
+        };
+        let id = card.rendered.notetype_id.to_string();
+        let tier = match self.render_tiers.get(&id).copied().unwrap_or_default() {
+            RenderTier::Text => RenderTier::Bitmap,
+            RenderTier::Bitmap => RenderTier::Text,
+        };
+        if tier == RenderTier::Bitmap && !cfg!(feature = "blitz") {
+            self.notice("Bitmap tier unavailable: build with --features blitz.");
+            return;
+        }
+        self.render_tiers.insert(id.clone(), tier);
+        view.render = None;
+        self.clear_images();
+        if let Some(path) = &self.config_path {
+            let saved = tanki_core::config::Config::load(path).and_then(|mut config| {
+                config.profile_mut(&self.profile_key()).render_tiers.insert(
+                    id,
+                    match tier {
+                        RenderTier::Text => tanki_core::config::RenderTier::Text,
+                        RenderTier::Bitmap => tanki_core::config::RenderTier::Bitmap,
+                    },
+                );
+                config.save(path)
+            });
+            if let Err(error) = saved {
+                self.error(format!(
+                    "Tier changed for this session; could not save: {error}"
+                ));
+                return;
+            }
+        }
+        self.notice(format!("This note type uses {tier:?} rendering."));
+    }
+
+    /// Lays out the current side if the cache is stale; returns it.
     pub(crate) fn ensure_rendered(&mut self) -> Option<&tanki_render::RenderedCard> {
         let graphics = self.services.images.mode();
         let Screen::Review(view) = &mut self.screen else {
@@ -1122,6 +1274,11 @@ impl<'a> App<'a> {
         let card = view.reviewer.card()?;
         let area = view.card_area;
         let hide = card.config.hide_audio_play_buttons;
+        let tier = self
+            .render_tiers
+            .get(&card.rendered.notetype_id.to_string())
+            .copied()
+            .unwrap_or_default();
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         (
             &html,
@@ -1131,6 +1288,8 @@ impl<'a> App<'a> {
             hide,
             &view.reviewer.expanded,
             format!("{graphics:?}"),
+            tier,
+            tanki_render::tier::revision(),
         )
             .hash(&mut hasher);
         let key = hasher.finish();
@@ -1142,8 +1301,58 @@ impl<'a> App<'a> {
                 &self.profile.media_dir,
                 display.night_mode,
             );
-            let options = display.render_options(graphics, area, hide, &view.reviewer.expanded);
-            let rendered = self.services.renderer.render(&side, &options);
+            let mut options = display.render_options(graphics, area, hide, &view.reviewer.expanded);
+            options.tier = tier;
+            let mut rendered = self.services.renderer.render(&side, &options);
+            let classification = self
+                .classified
+                .entry(card.rendered.notetype_id)
+                .or_insert_with(|| {
+                    tanki_render::tier::classify(
+                        if card.rendered.template_question.is_empty() {
+                            &card.rendered.question
+                        } else {
+                            &card.rendered.template_question
+                        },
+                        if card.rendered.template_answer.is_empty() {
+                            &card.rendered.answer
+                        } else {
+                            &card.rendered.template_answer
+                        },
+                        &card.rendered.css,
+                    )
+                });
+            if tier == tanki_render::tier::RenderTier::Text {
+                rendered
+                    .notices
+                    .extend(classification.reasons.iter().cloned());
+            }
+            if let Some(next) = view.reviewer.next_rendered() {
+                let next_side = services::card_side(
+                    next,
+                    next.review_question(),
+                    &self.profile.media_dir,
+                    display.night_mode,
+                );
+                let mut next_options = options.clone();
+                next_options.expanded.clear();
+                next_options.tier = self
+                    .render_tiers
+                    .get(&next.notetype_id.to_string())
+                    .copied()
+                    .unwrap_or_default();
+                tanki_render::tier::pre_render(&next_side, &next_options);
+                // The answer of the current card is also a predictable next side.
+            }
+            if !view.reviewer.showing_answer() && card.rendered.type_answer.is_none() {
+                let answer = services::card_side(
+                    &card.rendered,
+                    card.rendered.review_answer(""),
+                    &self.profile.media_dir,
+                    display.night_mode,
+                );
+                tanki_render::tier::pre_render(&answer, &options);
+            }
             // A newly shown answer scrolls to the divider (`<hr id=answer>`).
             if view.reviewer.showing_answer() && view.scroll == 0 {
                 if let Some(row) = rendered.answer_row {
@@ -1198,6 +1407,25 @@ impl<'a> App<'a> {
                 self.apply(fx);
             }
             Action::PauseAudio => self.services.audio.toggle_pause(),
+            Action::RecordVoice => match self.services.audio.toggle_recording() {
+                Ok(true) => self.notice("Recording own voice; press v to stop."),
+                Ok(false) => self.notice("Finishing recording; Shift+V replays when ready."),
+                Err(error) => self.error(error),
+            },
+            Action::ReplayVoice => {
+                if let Err(error) = self.services.audio.replay_recording() {
+                    self.error(error);
+                }
+            }
+            Action::ToggleMasks => {
+                let key = "occlusion:masks-hidden".to_string();
+                if !view.reviewer.expanded.remove(&key) {
+                    view.reviewer.expanded.insert(key);
+                }
+                view.render = None;
+                self.clear_images();
+            }
+            Action::CycleRenderTier => self.cycle_render_tier(),
             Action::SeekBack => self.services.audio.seek(-5.0),
             Action::SeekForward => self.services.audio.seek(5.0),
             Action::PlayNextButton => self.play_next_button(),
@@ -1391,12 +1619,23 @@ impl<'a> App<'a> {
             item(Action::Forget, "Reset Card to New...", false),
             item(Action::SetDueDate, "Set Due Date...", false),
             item(Action::SuspendCard, "Suspend Card", false),
+            item(Action::DeckOptions, "Options", false),
+            item(Action::CardInfo, "Card Info", false),
+            item(Action::PreviousCardInfo, "Previous Card Info", false),
             item(Action::ToggleMark, "Mark Note", card.queued.marked),
             item(Action::BuryNote, "Bury Note", false),
             item(Action::SuspendNote, "Suspend Note", false),
             item(Action::DeleteNote, "Delete Note...", false),
             item(Action::EditNote, "Edit Note...", false),
             item(Action::Replay, "Replay Audio", false),
+            item(Action::RecordVoice, "Record Own Voice", false),
+            item(Action::ReplayVoice, "Replay Own Voice", false),
+            item(Action::ToggleMasks, "Show / Hide Occlusion Masks", false),
+            item(
+                Action::CycleRenderTier,
+                "Switch Text / Bitmap for Note Type",
+                false,
+            ),
             item(Action::PlayNextButton, "Play Next Audio Button", false),
             item(Action::PauseAudio, "Pause Audio", false),
             item(Action::SeekBack, "Audio -5s", false),
@@ -1697,6 +1936,7 @@ pub fn graphics_name(mode: tanki_term::GraphicsMode) -> &'static str {
 }
 
 mod data;
+mod manage;
 mod notes;
 
 #[cfg(test)]

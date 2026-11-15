@@ -5,3 +5,4 @@
 
 /xtask/bootstrap/target/
 /scripts/__pycache__/
+/.cargo/bounded.lock

@@ -34,17 +34,19 @@ fn question_answer_rate_and_finish() {
             "SchedulerStatus",
             "Queue",
             "Render",
+            "Render",
             "StudyConfig"
         ]
     );
     assert!(matches!(
         b.state.borrow().log[2],
-        Command::Queue { limit: 1 }
+        Command::Queue { limit: 2 }
     ));
     assert_eq!(r.phase(), Phase::Question);
     assert!(has_cue(&fx, CueKind::ShowQuestion));
     assert_eq!(r.side_html().unwrap(), "Q1");
     assert_eq!(r.counts().new, 2);
+    assert_eq!(r.next_rendered().unwrap().review_question(), "Q2");
 
     // Ratings are ignored on the question side.
     assert!(r.answer(&b, Rating::Good, now).is_empty());
@@ -449,10 +451,11 @@ fn card_actions_send_commands_and_refresh() {
     assert_eq!(r.card().unwrap().queued.flag, 3);
     r.toggle_flag(&b, 3, now);
     assert_eq!(r.card().unwrap().queued.flag, 0);
+    b.clear_log();
     r.toggle_mark(&b, now);
     assert!(r.card().unwrap().queued.marked);
     assert!(matches!(
-        b.state.borrow().log.iter().rev().nth(1),
+        b.state.borrow().log.first(),
         Some(Command::SetMarked { marked: true, note_ids }) if note_ids == &[10]
     ));
 
@@ -542,7 +545,7 @@ fn external_changes_follow_op_executed() {
     assert!(fx.contains(&Effect::CardChanged));
     assert_eq!(r.side_html().unwrap(), "edited");
     assert_eq!(r.phase(), Phase::Answer);
-    assert_eq!(b.names(), ["Render", "Queue"]);
+    assert_eq!(b.names(), ["Render", "Queue", "Render"]);
     // Queues changed: the question is shown again.
     r.on_changes(
         &b,
@@ -569,12 +572,12 @@ fn external_changes_follow_op_executed() {
 }
 
 #[test]
-fn custom_scheduling_warns_once_and_scheduler_check_offers_upgrade() {
+fn custom_scheduling_runs_without_unsupported_warning_and_scheduler_check_offers_upgrade() {
     let b = FakeBackend::new(vec![card(1, "Q", "A"), card(2, "Q", "A")]);
     b.with(|s| s.config.custom_scheduling_set = true);
     let now = t0();
     let (mut r, fx) = started(&b, now);
-    assert!(fx.contains(&Effect::Warning(CUSTOM_SCHEDULING_WARNING.into())));
+    assert!(!fx.iter().any(|e| matches!(e, Effect::Warning(_))));
     r.show_answer(&b, now);
     let fx = r.answer(&b, Rating::Good, now);
     assert!(!fx.iter().any(|e| matches!(e, Effect::Warning(_))));

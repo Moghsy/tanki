@@ -5,7 +5,12 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+default = []
+blitz = ["tanki-render/blitz"]
+
 [dependencies]
+tanki-connect = { path = "../tanki-connect" }
 tanki-core = { path = "../tanki-core" }
 tanki-render = { path = "../tanki-render" }
 tanki-term = { path = "../tanki-term" }
@@ -13,3 +18,6 @@ tanki-media = { path = "../tanki-media" }
 ratatui.workspace = true
 crossterm.workspace = true
 unicode-width = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

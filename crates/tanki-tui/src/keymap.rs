@@ -21,10 +21,13 @@ pub enum Scope {
     Add,
     /// The browser; its widget has its own key table too.
     Browser,
+    /// Management screens (deck options, note types, statistics, tools);
+    /// each widget has its own key table.
+    Manage,
 }
 
 impl Scope {
-    pub const ALL: [Scope; 9] = [
+    pub const ALL: [Scope; 10] = [
         Scope::Global,
         Scope::Decks,
         Scope::Overview,
@@ -34,6 +37,7 @@ impl Scope {
         Scope::Menu,
         Scope::Add,
         Scope::Browser,
+        Scope::Manage,
     ];
     pub fn name(self) -> &'static str {
         match self {
@@ -46,6 +50,7 @@ impl Scope {
             Scope::Menu => "menu",
             Scope::Add => "add",
             Scope::Browser => "browser",
+            Scope::Manage => "manage",
         }
     }
     pub fn from_name(name: &str) -> Option<Self> {
@@ -62,6 +67,7 @@ impl Scope {
             Scope::Menu => "Menus",
             Scope::Add => "Add / edit note",
             Scope::Browser => "Browser",
+            Scope::Manage => "Management screens",
         }
     }
 }
@@ -132,6 +138,10 @@ actions! {
     SeekBack = "seek-back", "Audio -5s";
     SeekForward = "seek-forward", "Audio +5s";
     PlayNextButton = "play-next-button", "Play the next audio button";
+    RecordVoice = "record-voice", "Start / stop recording own voice";
+    ReplayVoice = "replay-voice", "Replay own voice";
+    ToggleMasks = "toggle-masks", "Show / hide image occlusion masks";
+    CycleRenderTier = "cycle-render-tier", "Switch text / bitmap for this note type";
     ToggleMark = "toggle-mark", "Mark / unmark note";
     BuryCard = "bury-card", "Bury card";
     BuryNote = "bury-note", "Bury note";
@@ -154,6 +164,22 @@ actions! {
     AddNote = "add-note", "Add notes";
     Browse = "browse", "Browse cards and notes";
     EditNote = "edit-note", "Edit the current note";
+    DeckOptions = "deck-options", "Deck options";
+    NoteTypes = "note-types", "Manage note types";
+    CreateDeck = "create-deck", "Create a deck";
+    RenameDeck = "rename-deck", "Rename the deck";
+    MoveDeck = "move-deck", "Move the deck to...";
+    DeleteDeck = "delete-deck", "Delete the deck";
+    FilteredDeck = "filtered-deck", "Create a filtered deck";
+    CustomStudy = "custom-study", "Custom study";
+    RebuildDeck = "rebuild-deck", "Rebuild the filtered deck";
+    EmptyDeck = "empty-deck", "Empty the filtered deck";
+    DeckDescription = "deck-description", "Deck description";
+    Statistics = "statistics", "Statistics";
+    CardInfo = "card-info", "Card info";
+    PreviousCardInfo = "previous-card-info", "Previous card info";
+    SharedDecks = "shared-decks", "Get shared decks (opens AnkiWeb's page in the web browser)";
+    Tools = "tools", "Tools: check database and media, empty cards, preferences, profiles";
     NextImage = "next-image", "Next image";
     PrevImage = "previous-image", "Previous image";
 }
@@ -333,6 +359,35 @@ pub const DEFAULTS: &[(&str, &str, &str)] = &[
     // Main window shortcuts (R4 §22.1): Add, Browse.
     ("global", "a", "add-note"),
     ("global", "b", "browse"),
+    // Tools > Manage Note Types (R4 §22.1); Shift+N without the kitty protocol.
+    ("global", "ctrl+shift+n", "note-types"),
+    ("decks", "shift+n", "note-types"),
+    // Deck options: overview `o` (R4 §22.2) and the deck list's gear menu.
+    ("decks", "o", "deck-options"),
+    ("overview", "o", "deck-options"),
+    // Tools > Create Filtered Deck (R4 §22.1).
+    ("global", "f", "filtered-deck"),
+    // Statistics `t` (R4 §22.1); card info `i`, previous Ctrl+Alt+I (R4 T6).
+    ("global", "t", "statistics"),
+    // Tools > Preferences is Ctrl+P on desktop; tanki's Tools screen holds it.
+    ("global", "ctrl+p", "tools"),
+    ("decks", "shift+t", "tools"),
+    ("review", "i", "card-info"),
+    ("review", "o", "deck-options"),
+    ("review", "ctrl+alt+i", "previous-card-info"),
+    // Deck list: Create Deck and the gear menu (R4 §4 D6), "Move to..."
+    // in place of drag and drop.
+    ("decks", "n", "create-deck"),
+    ("decks", "e", "rename-deck"),
+    ("decks", "f2", "rename-deck"),
+    ("decks", "shift+m", "move-deck"),
+    ("decks", "delete", "delete-deck"),
+    ("decks", "shift+d", "delete-deck"),
+    // Overview `c` / `r` / `e` (R4 §22.2) and the description.
+    ("overview", "c", "custom-study"),
+    ("overview", "r", "rebuild-deck"),
+    ("overview", "e", "empty-deck"),
+    ("overview", "i", "deck-description"),
     // Deck list (R4 §4) with vim-style movement.
     ("decks", "up", "up"),
     ("decks", "k", "up"),
@@ -385,6 +440,10 @@ pub const DEFAULTS: &[(&str, &str, &str)] = &[
     ("review", "4", "easy"),
     ("review", "u", "undo"),
     ("review", "m", "more"),
+    ("review", "shift+m", "toggle-masks"),
+    ("review", "v", "record-voice"),
+    ("review", "shift+v", "replay-voice"),
+    ("review", "ctrl+t", "cycle-render-tier"),
     ("review", "r", "replay-audio"),
     ("review", "f5", "replay-audio"),
     ("review", "5", "pause-audio"),

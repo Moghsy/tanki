@@ -4,27 +4,45 @@ mod actor;
 mod backup;
 mod browse_ops;
 pub mod config;
+pub mod connect;
+mod custom_scheduling;
 mod data;
+pub mod deck_options;
+pub mod deck_tools;
 mod edit;
 mod edit_convert;
 mod fixture;
+mod latex;
+pub mod maintenance;
+mod manage;
 pub mod notefile;
 mod notes_ops;
+pub mod notetypes;
 #[doc(hidden)]
 pub mod packages;
 mod replacement;
 mod safety;
+pub mod stats;
 mod study;
 mod sync;
 #[doc(hidden)]
 pub mod sync_ops;
+pub mod transfer;
 mod types;
 mod writeback;
-pub use actor::{CollectionActor, PendingOperation};
+pub use actor::{CollectionActor, PendingCommand, PendingOperation};
+pub use connect::{ConnectCommand, ConnectResponse};
 pub use data::*;
+pub use deck_options::{DeckOptionsCommand, DeckOptionsResponse};
+pub use deck_tools::{DeckToolsCommand, DeckToolsResponse};
 pub use edit::*;
+pub use maintenance::{MaintenanceCommand, MaintenanceResponse};
+pub use manage::{ManageCommand, ManageResponse};
+pub use notetypes::{NotetypeCommand, NotetypeResponse};
 pub use safety::validate_profile;
+pub use stats::{StatsCommand, StatsResponse};
 pub use sync::SyncEndpoint;
+pub use transfer::{TransferCommand, TransferResponse};
 pub use types::*;
 
 #[cfg(test)]

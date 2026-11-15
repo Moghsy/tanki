@@ -105,3 +105,24 @@ fn actor_holds_the_lock_after_every_backup() -> tanki_core::Result<()> {
     assert!(!locked_for_another_process(&file), "released on close");
     Ok(())
 }
+
+#[test]
+fn actor_holds_the_lock_after_check_database_and_media() -> tanki_core::Result<()> {
+    use tanki_core::maintenance::MaintenanceCommand;
+    use tanki_core::{CollectionActor, Command, ManageCommand};
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("collection.anki2");
+    let actor = CollectionActor::open(dir.path())?;
+    actor.execute(Command::GenerateStudyFixture)?;
+    for command in [
+        MaintenanceCommand::CheckDatabase { confirmed: true },
+        MaintenanceCommand::CheckMedia,
+    ] {
+        let name = format!("{command:?}");
+        actor.execute(Command::Manage(ManageCommand::Maintenance(command)))?;
+        assert!(locked_for_another_process(&file), "after {name}");
+        actor.execute(Command::DeckTree)?;
+    }
+    actor.close()?;
+    Ok(())
+}

@@ -1,11 +1,12 @@
 //! Phase 3 in the app: the add / edit screen and the browser as layers over
 //! the current screen (PLAN 8.4-8.7), their intents, and `$EDITOR` round
 //! trips with the screen suspended by the injected [`super::EditorRunner`].
-use super::{App, ConfirmKind, Layer, Overlay, Screen};
+use super::{App, ConfirmKind, DeckToolsLayer, Layer, Overlay, Screen, TransferLayer};
 use crate::add_ui::{AddIntent, AddUi, ExternalEdit};
 use crate::browser_ui::{BrowserIntent, BrowserOptions, BrowserUi, Focus as BrowserFocus};
 use crate::editor_flow::{self, Outcome, Problem, TextOutcome};
 use crate::keymap::{Action, Chord};
+use crate::stats_ui::CardInfoIntent;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::path::{Path, PathBuf};
 use tanki_core::{
@@ -44,7 +45,7 @@ impl App<'_> {
             .and_then(|path| Config::load(path).ok())
     }
 
-    fn editor_command(&self) -> Vec<String> {
+    pub(super) fn editor_command(&self) -> Vec<String> {
         self.load_config()
             .map(|c| c.editor)
             .unwrap_or_default()
@@ -53,7 +54,7 @@ impl App<'_> {
 
     // ---- opening and closing -------------------------------------------------
 
-    fn push_layer(&mut self, layer: Layer) {
+    pub(super) fn push_layer(&mut self, layer: Layer) {
         if self.layers.is_empty() {
             // `Overview.show()`-like: the reviewer's audio stops.
             self.services.audio.stop();
@@ -62,7 +63,7 @@ impl App<'_> {
         self.clear_images();
     }
 
-    fn pop_layer(&mut self) {
+    pub(super) fn pop_layer(&mut self) {
         self.layers.pop();
         if self.layers.is_empty() {
             if let Screen::Review(view) = &mut self.screen {
@@ -127,13 +128,10 @@ impl App<'_> {
 
     /// Quits, asking first when an add / edit form holds unsaved input.
     pub(crate) fn request_quit(&mut self) {
-        let unsaved = self.layers.iter().any(|layer| match layer {
-            Layer::Add(ui) => ui.has_unsaved_input(),
-            Layer::Browser(_) => false,
-        });
+        let unsaved = self.layers.iter().any(Layer::has_unsaved_input);
         if unsaved {
             self.overlay = Some(Overlay::Confirm {
-                message: "Discard the unsaved note and quit?".into(),
+                message: "Discard unsaved changes and quit?".into(),
                 kind: ConfirmKind::QuitDiscard,
                 yes: false,
             });
@@ -153,6 +151,8 @@ impl App<'_> {
         let modal = match top {
             Layer::Add(ui) => ui.has_overlay(),
             Layer::Browser(ui) => ui.has_dialog(),
+            // Management screens take every key themselves.
+            _ => true,
         };
         if let Some(action) = self.keymap.lookup(&[top.scope()], &chord) {
             if action == Action::Quit || !modal {
@@ -169,6 +169,48 @@ impl App<'_> {
             Some(Layer::Browser(ui)) => {
                 let intent = ui.on_key(backend, key);
                 self.run_browser_intent(intent);
+            }
+            Some(Layer::DeckOptions(ui)) => {
+                let intent = ui.on_key(key, backend);
+                self.run_deck_options_intent(intent);
+            }
+            Some(Layer::Notetypes(ui)) => {
+                let intent = ui.on_key(backend, key);
+                self.run_notetypes_intent(intent);
+            }
+            Some(Layer::ChangeNotetype(ui)) => {
+                let intent = ui.on_key(backend, key);
+                self.run_change_intent(intent);
+            }
+            Some(Layer::Stats(ui)) => {
+                let intent = ui.on_key(backend, key);
+                self.run_stats_intent(intent);
+            }
+            Some(Layer::Tools(ui)) => {
+                let intent = ui.on_key(key, backend);
+                self.run_tools_intent(intent);
+            }
+            Some(Layer::Transfer(layer)) => {
+                let intent = match &mut **layer {
+                    TransferLayer::Import(ui) => ui.on_key(key, backend),
+                    TransferLayer::Export(ui) => ui.on_key(key, backend),
+                    TransferLayer::Duplicates(ui) => ui.on_key(key, backend),
+                };
+                self.run_transfer_intent(intent);
+            }
+            Some(Layer::CardInfo(ui)) => {
+                if ui.on_key(key) == CardInfoIntent::Close {
+                    self.pop_layer();
+                }
+            }
+            Some(Layer::DeckTools(dialog)) => {
+                let intent = match &mut **dialog {
+                    DeckToolsLayer::Filtered(ui) => ui.on_key(backend, key),
+                    DeckToolsLayer::CustomStudy(ui) => ui.on_key(backend, key),
+                    DeckToolsLayer::Prompt(ui) => ui.on_key(backend, key),
+                    DeckToolsLayer::Description(ui) => ui.on_key(backend, key),
+                };
+                self.run_deck_tools_intent(intent);
             }
             None => {}
         }
@@ -196,7 +238,18 @@ impl App<'_> {
                     }
                 }
             }
-            None => {}
+            Some(Layer::Notetypes(ui)) => {
+                let intent = ui.on_paste(backend, text);
+                self.run_notetypes_intent(intent);
+            }
+            Some(Layer::Tools(ui)) => ui.paste(text),
+            Some(Layer::DeckTools(dialog)) => match &mut **dialog {
+                DeckToolsLayer::Filtered(ui) => ui.on_paste(text),
+                DeckToolsLayer::Prompt(ui) => ui.on_paste(text),
+                DeckToolsLayer::Description(ui) => ui.on_paste(text),
+                DeckToolsLayer::CustomStudy(_) => {}
+            },
+            _ => {}
         }
     }
 
@@ -236,10 +289,11 @@ impl App<'_> {
             }
             BrowserIntent::EditNotes(ids) => self.edit_notes(&ids),
             BrowserIntent::SearchCommitted(query) => self.remember_search(&query),
-            BrowserIntent::CardInfo(_) => self.notice("Card info is not available yet (Phase 5)."),
-            BrowserIntent::FilteredDeck(_) => {
-                self.notice("Creating filtered decks is not available yet (Phase 5).")
-            }
+            BrowserIntent::CardInfo(card_id) => self.open_card_info(Some(card_id), false),
+            BrowserIntent::ChangeNotetype(ids) => self.open_change_notetype(ids),
+            BrowserIntent::FindDuplicates(search) => self.open_duplicates(&search),
+            BrowserIntent::ExportText { notes, ids } => self.open_text_export_of(notes, ids),
+            BrowserIntent::FilteredDeck(search) => self.open_filtered_deck_new(Some(search)),
             BrowserIntent::Preview(_) => {
                 self.notice("A full-screen preview is not available yet; p shows the preview pane.")
             }
@@ -266,6 +320,7 @@ impl App<'_> {
     /// The browser's edit: the notes in a note file, written back with
     /// `UpdateNotes` (and new blocks added).
     fn edit_notes(&mut self, ids: &[i64]) {
+        self.services.audio.shutdown();
         if ids.is_empty() {
             return;
         }
@@ -320,6 +375,7 @@ impl App<'_> {
     /// The add screen's field or whole note in `$EDITOR`; the result goes
     /// back into the form (nothing is written to the collection here).
     fn external_edit(&mut self, edit: ExternalEdit) {
+        self.services.audio.shutdown();
         let command = self.editor_command();
         let options = self.flow_options.clone();
         let editor = &mut self.editor;
@@ -401,7 +457,7 @@ impl App<'_> {
     }
 
     /// The screen was handed to the editor: repaint every cell.
-    fn after_editor(&mut self) {
+    pub(super) fn after_editor(&mut self) {
         self.clear_images();
         self.full_redraw = true;
     }
@@ -413,13 +469,39 @@ impl App<'_> {
                 .iter()
                 .map(|(k, d)| ((*k).to_owned(), (*d).to_owned()))
                 .collect(),
-            Layer::Browser(ui) => ui
-                .hints()
-                .into_iter()
-                .map(|(k, d)| (k.to_owned(), d.to_owned()))
-                .collect(),
+            Layer::Browser(ui) => pairs(ui.hints()),
+            Layer::DeckOptions(ui) => pairs(ui.hints()),
+            Layer::Notetypes(ui) => {
+                let keys = if ui.on_list() {
+                    crate::notetypes_ui::LIST_KEYS
+                } else {
+                    crate::notetypes_ui::FIELD_KEYS
+                };
+                pairs(keys.to_vec())
+            }
+            Layer::ChangeNotetype(_) => pairs(crate::notetypes_ui::CHANGE_KEYS.to_vec()),
+            Layer::Stats(ui) => pairs(ui.hints()),
+            Layer::CardInfo(ui) => pairs(ui.hints()),
+            Layer::Tools(ui) => pairs(ui.hints()),
+            Layer::Transfer(layer) => pairs(match &**layer {
+                TransferLayer::Import(ui) => ui.hints(),
+                TransferLayer::Export(ui) => ui.hints(),
+                TransferLayer::Duplicates(ui) => ui.hints(),
+            }),
+            Layer::DeckTools(dialog) => pairs(match &**dialog {
+                DeckToolsLayer::Filtered(ui) => ui.hints(),
+                DeckToolsLayer::CustomStudy(ui) => ui.hints(),
+                DeckToolsLayer::Prompt(ui) => ui.hints(),
+                DeckToolsLayer::Description(ui) => ui.hints(),
+            }),
         })
     }
+}
+
+fn pairs(keys: Vec<(&str, &str)>) -> Vec<(String, String)> {
+    keys.into_iter()
+        .map(|(k, d)| (k.to_owned(), d.to_owned()))
+        .collect()
 }
 
 /// What may change in the add form's note file: field text and tags.
@@ -467,7 +549,7 @@ fn note_problems(text: &str, original: &FileNote) -> Vec<Problem> {
 }
 
 /// Editors end files with a newline; a field that had none gets none.
-fn without_final_newline(original: &str, mut text: String) -> String {
+pub(super) fn without_final_newline(original: &str, mut text: String) -> String {
     if !original.ends_with('\n') {
         if text.ends_with("\r\n") {
             text.truncate(text.len() - 2);
@@ -478,7 +560,7 @@ fn without_final_newline(original: &str, mut text: String) -> String {
     text
 }
 
-fn aborted(kept: Option<PathBuf>) -> String {
+pub(super) fn aborted(kept: Option<PathBuf>) -> String {
     match kept {
         Some(path) => format!("Edit cancelled; your text is kept in {}", path.display()),
         None => "Edit cancelled.".into(),

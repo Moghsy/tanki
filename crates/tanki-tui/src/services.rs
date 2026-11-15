@@ -424,7 +424,7 @@ mod plain {
             images: Vec::new(),
             widgets,
             answer_row,
-            notices: vec!["plain-text renderer (development fallback)".into()],
+            notices: vec![],
         }
     }
 }
@@ -502,6 +502,17 @@ pub trait ImageDisplay {
     fn cycle(&mut self) -> GraphicsMode;
     /// Draws the image scaled into `area`.
     fn draw(&mut self, source: &ImageSource, area: Rect, buf: &mut Buffer) -> ImageState;
+    /// A vertical slice at the original cell scale, for scrolling tall cards.
+    fn draw_slice(
+        &mut self,
+        source: &ImageSource,
+        _full_size: (u16, u16),
+        _skip_rows: u16,
+        area: Rect,
+        buf: &mut Buffer,
+    ) -> ImageState {
+        self.draw(source, area, buf)
+    }
     /// Forget placements (screen change).
     fn clear(&mut self);
     /// Escape sequences to write to the terminal after `clear`/`cycle`.
@@ -513,6 +524,7 @@ pub struct TermImages {
     images: tanki_term::Images,
     cache: tanki_render::ImageCache,
     cell_px: (u16, u16),
+    started: std::time::Instant,
 }
 
 impl TermImages {
@@ -525,6 +537,7 @@ impl TermImages {
             images,
             cache,
             cell_px: cell_px.unwrap_or((10, 20)),
+            started: std::time::Instant::now(),
         }
     }
     pub fn subscribe(&self) -> std::sync::mpsc::Receiver<()> {
@@ -540,25 +553,52 @@ impl ImageDisplay for TermImages {
         self.images.cycle()
     }
     fn draw(&mut self, source: &ImageSource, area: Rect, buf: &mut Buffer) -> ImageState {
+        self.draw_slice(source, (area.width, area.height), 0, area, buf)
+    }
+    fn draw_slice(
+        &mut self,
+        source: &ImageSource,
+        full_size: (u16, u16),
+        skip_rows: u16,
+        area: Rect,
+        buf: &mut Buffer,
+    ) -> ImageState {
         let cache = &self.cache;
         let max_px = (
-            u32::from(area.width) * u32::from(self.cell_px.0),
-            u32::from(area.height) * u32::from(self.cell_px.1),
+            u32::from(full_size.0) * u32::from(self.cell_px.0),
+            u32::from(full_size.1) * u32::from(self.cell_px.1),
         );
         cache.request(source, max_px);
-        match cache.get(source, max_px) {
+        let elapsed = self.started.elapsed();
+        match cache.get_at(source, max_px, elapsed) {
             None => ImageState::Loading,
             Some(Err(e)) => ImageState::Failed(format!("{e:?}")),
             Some(Ok(image)) => {
                 let mut hasher = std::collections::hash_map::DefaultHasher::new();
                 source.hash(&mut hasher);
-                self.images.render(hasher.finish(), &image, area, buf);
+                cache
+                    .frame_index_at(source, max_px, elapsed)
+                    .hash(&mut hasher);
+                (full_size, skip_rows).hash(&mut hasher);
+                let top = u32::from(skip_rows) * u32::from(self.cell_px.1);
+                if top >= image.height() {
+                    return ImageState::Drawn;
+                }
+                let height =
+                    (u32::from(area.height) * u32::from(self.cell_px.1)).min(image.height() - top);
+                if skip_rows == 0 && height == image.height() {
+                    self.images.render(hasher.finish(), &image, area, buf);
+                } else {
+                    let cropped = image.crop_imm(0, top, image.width(), height);
+                    self.images.render(hasher.finish(), &cropped, area, buf);
+                }
                 ImageState::Drawn
             }
         }
     }
     fn clear(&mut self) {
         self.images.clear();
+        self.started = std::time::Instant::now();
     }
     fn take_cleanup(&mut self) -> String {
         self.images.take_cleanup()
@@ -595,6 +635,21 @@ pub enum AudioStatus {
 }
 
 pub trait AudioPlayer {
+    fn shutdown(&self) {
+        self.stop();
+    }
+    fn owns_terminal(&self) -> bool {
+        false
+    }
+    fn is_recording(&self) -> bool {
+        false
+    }
+    fn toggle_recording(&self) -> Result<bool, String> {
+        Err("Voice recording unavailable".into())
+    }
+    fn replay_recording(&self) -> Result<(), String> {
+        Err("No recording available".into())
+    }
     /// Applies Anki's autoplay/replay rules to `cue` and plays the result.
     fn cue(&self, cue: &AudioCue);
     /// One tag (a replay button).
@@ -625,6 +680,21 @@ pub struct MediaAudio {
 }
 
 impl AudioPlayer for MediaAudio {
+    fn shutdown(&self) {
+        let _ = self.audio.stop_and_wait();
+    }
+    fn owns_terminal(&self) -> bool {
+        self.audio.owns_terminal()
+    }
+    fn is_recording(&self) -> bool {
+        self.audio.is_recording()
+    }
+    fn toggle_recording(&self) -> Result<bool, String> {
+        self.audio.toggle_recording()
+    }
+    fn replay_recording(&self) -> Result<(), String> {
+        self.audio.replay_recording()
+    }
     fn cue(&self, cue: &AudioCue) {
         // Desktop's `play_tags` replaces the queue even when empty, so
         // showing a side without sound still interrupts per the preference.

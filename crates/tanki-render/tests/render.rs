@@ -206,6 +206,62 @@ fn editor_html_cell_buffer() {
 }
 
 #[test]
+fn phase4_ruby_bidi_and_nested_table_cells() {
+    let html = "<ruby>東京<rt>とうきょう</rt>駅<rt>えき</rt></ruby><div dir=rtl><b>אבג</b> 123 <i>דהו</i></div><table><tr><td>outer<table><tr><td>inner</td><td>界</td></tr></table></td><td><ruby>漢<rt>かん</rt></ruby></td></tr></table>";
+    let mut snapshot = String::new();
+    for ruby in [RubyMode::Above, RubyMode::Inline] {
+        let options = RenderOptions {
+            width: 40,
+            ruby,
+            ..Default::default()
+        };
+        let card = render(&side(html, ""), &options);
+        assert!(plain(&card).contains("inner"));
+        assert!(plain(&card).contains("גבא"));
+        assert!(card.lines.iter().all(|line| line
+            .spans
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect::<String>()
+            .width()
+            <= 40));
+        snapshot.push_str(&format!("{ruby:?}\n{}\n", cells(&card, 40)));
+    }
+    insta::assert_snapshot!("phase4_text_extras", snapshot);
+}
+
+#[test]
+fn occlusion_uses_composited_source_on_both_sides_and_toggle() {
+    let dir = tempfile::tempdir().unwrap();
+    image::RgbaImage::new(100, 100)
+        .save(dir.path().join("diagram.png"))
+        .unwrap();
+    for class in ["cloze", "cloze-highlight"] {
+        let mut side=side(&format!("<div style='display:none'><div class='{class}' data-shape=rect data-left=.1 data-top=.1 data-width=.5 data-height=.5 data-occludeinactive=1></div></div><div id=image-occlusion-container><img src=diagram.png><canvas id=image-occlusion-canvas></canvas></div><script>anki.imageOcclusion.setup()</script>"),"");
+        side.media_dir = dir.path().into();
+        let mut options = RenderOptions {
+            images: true,
+            ..Default::default()
+        };
+        let card = render(&side, &options);
+        let ImageSource::Occlusion { overlay, .. } = &card.images[0].source else {
+            panic!("must draw masks")
+        };
+        assert_eq!(overlay.matches("<rect").count(), 1);
+        assert!(!card
+            .notices
+            .iter()
+            .any(|n| n.contains("JavaScript") || n.contains("not drawn")));
+        options.expanded.insert("occlusion:masks-hidden".into());
+        let card = render(&side, &options);
+        let ImageSource::Occlusion { overlay, .. } = &card.images[0].source else {
+            panic!("must keep composited source")
+        };
+        assert!(!overlay.contains("<rect"));
+    }
+}
+
+#[test]
 fn images_reserve_their_blank_cells_and_use_real_cell_size() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("picture.png");

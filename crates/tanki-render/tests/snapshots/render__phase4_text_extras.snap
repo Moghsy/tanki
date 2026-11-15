@@ -1,0 +1,34 @@
+---
+source: crates/tanki-render/tests/render.rs
+expression: snapshot
+---
+Above
+00|と う き ょ う え き                           |
+01|   東 京     駅                            |
+02|                             והד 123 גבא|
+  29..32: Reset Reset ITALIC
+  37..40: Reset Reset BOLD
+03|┌────────────────┬──────┐               |
+04|│ outer          │ か ん  │               |
+05|│ ┌───────┬────┐ │  漢   │               |
+06|│ │ inner │ 界  │ │      │               |
+07|│ └───────┴────┘ │      │               |
+08|└────────────────┴──────┘               |
+answer_row: None
+widgets: []
+notices: []
+
+Inline
+00|東 京 (と う き ょ う )駅 (え き )                |
+01|                             והד 123 גבא|
+  29..32: Reset Reset ITALIC
+  37..40: Reset Reset BOLD
+02|┌────────────────┬──────────┐           |
+03|│ outer          │ 漢 (か ん ) │           |
+04|│ ┌───────┬────┐ │          │           |
+05|│ │ inner │ 界  │ │          │           |
+06|│ └───────┴────┘ │          │           |
+07|└────────────────┴──────────┘           |
+answer_row: None
+widgets: []
+notices: []

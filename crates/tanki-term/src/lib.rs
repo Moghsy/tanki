@@ -47,6 +47,8 @@ pub struct Capabilities {
     pub keyboard_enhancement: bool,
     /// DECSET 2026 synchronized output available.
     pub synchronized_output: bool,
+    /// Queried XTVERSION identifies kitty >= 0.40, outside multiplexers.
+    pub text_sizing: bool,
     /// XTVERSION reply.
     pub version: Option<String>,
     /// Running inside tmux (DCS passthrough needed).
@@ -63,6 +65,8 @@ impl Capabilities {
 
 mod images;
 pub use images::Images;
+mod text_sizing;
+pub use text_sizing::sized_text;
 
 /// Queries the terminal once (raw mode, DA1 sentinel, one second timeout).
 /// Call before any event reader starts. Raw mode is left as it was found.
@@ -271,6 +275,7 @@ fn capabilities(requested: GraphicsMode, c: &Replies, hints: &Hints) -> Capabili
         foreground: c.foreground.as_deref().and_then(parse_color),
         keyboard_enhancement: c.keyboard.is_some(),
         synchronized_output: matches!(c.modes[0].as_deref(), Some("1" | "2" | "3")),
+        text_sizing: text_sizing::supported(c.version.as_deref(), !hints.tmux.is_empty()),
         version: c.version.clone().filter(|v| !v.is_empty()),
         tmux: !hints.tmux.is_empty(),
     }

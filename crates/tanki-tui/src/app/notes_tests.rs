@@ -347,7 +347,7 @@ fn browser_opens_on_the_current_card_and_searches_are_remembered() {
     );
     snapshot("browser_layer", &mut a);
     // Not available yet: said, not done.
-    a.run_browser_intent(BrowserIntent::CardInfo(3));
+    a.run_browser_intent(BrowserIntent::Preview(3));
     assert!(message(&a).contains("not available yet"));
     // `q` closes; the reviewer is still on its card.
     press(&mut a, KeyCode::Char('q'));

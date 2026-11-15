@@ -111,10 +111,10 @@ struct Walker<'a> {
     details_keys: HashMap<NodeId, String>,
     cur_widget: Option<usize>,
     cur_link: Option<Rc<str>>,
-    in_math: bool,
     depth: usize,
     table_depth: usize,
     image_occlusion: bool,
+    occlusion: Option<crate::occlusion::Occlusion>,
 }
 
 thread_local! {
@@ -281,10 +281,10 @@ pub fn render(side: &CardSide, opts: &RenderOptions) -> RenderedCard {
         details_keys: HashMap::new(),
         cur_widget: None,
         cur_link: None,
-        in_math: false,
         depth: 0,
         table_depth: 0,
         image_occlusion: false,
+        occlusion: None,
     };
     w.prepass(&dom);
 
@@ -401,10 +401,15 @@ impl Walker<'_> {
             }
         }
         if self.image_occlusion {
-            // The IO script, canvas and toggle button are expected; masks are Phase 4.
             self.notices.retain(|n| !n.starts_with("card has buttons"));
-            self.notice("image occlusion masks are not drawn yet");
-            scripts.retain(|s| !s.contains("imageOcclusion"));
+            self.occlusion = crate::occlusion::Occlusion::parse(dom, &self.styler.sheet);
+            if self.occlusion.as_ref().is_some_and(|io| io.toggle) {
+                self.notice("image occlusion: M toggles masks");
+            }
+            if !self.opts.images {
+                self.notice("image occlusion requires graphics (try --graphics=blocks)");
+            }
+            scripts.retain(|s| !crate::tier::native_io_script(s));
         } else if dom
             .tree
             .root()
@@ -447,6 +452,11 @@ impl Walker<'_> {
         };
         Meta {
             style: Style {
+                text_scale: if st.font_px < self.styler.base_font_px * 0.95 {
+                    ((st.font_px / self.styler.base_font_px * 100.0).round() as u8).clamp(10, 90)
+                } else {
+                    0
+                },
                 fg,
                 bg: st.bg,
                 bold: st.bold,
@@ -478,7 +488,6 @@ impl Walker<'_> {
     }
 
     fn flush(&mut self, para: &mut Para, out: &mut Out, frame: Frame) {
-        self.in_math = false;
         if para.is_empty() {
             *para = Para::new(para.align, para.rtl, para.dir_auto);
             return;
@@ -585,13 +594,13 @@ impl Walker<'_> {
         self.depth += 1;
         if self.depth > MAX_DEPTH {
             let t: String = parent.text().collect();
-            self.text(&t, pst, para);
+            self.text(&t, pst, para, frame);
             self.depth -= 1;
             return;
         }
         for child in parent.children() {
             match child.value() {
-                Node::Text(t) => self.text(t, pst, para),
+                Node::Text(t) => self.text(t, pst, para, frame),
                 Node::Element(_) => {
                     let Some(el) = ElementRef::wrap(child) else {
                         continue;
@@ -690,7 +699,7 @@ impl Walker<'_> {
                 let mut s = st.clone();
                 s.dim = true;
                 let t: String = el.text().collect();
-                self.text(&t, &s, para);
+                self.text(&t, &s, para, frame);
             }
             "a" if self.hint_anchors.contains_key(&el.id()) => self.hint(el, &st, para),
             _ => {
@@ -717,14 +726,14 @@ impl Walker<'_> {
     }
 
     /// Text node: audio references become replay widgets; MathJax is dimmed.
-    fn text(&mut self, t: &str, st: &Computed, para: &mut Para) {
+    fn text(&mut self, t: &str, st: &Computed, para: &mut Para, frame: Frame) {
         if st.hidden || st.color == Fg::Transparent {
             para.push_hidden(t, st.white_space);
             return;
         }
         let mut rest = t;
         while let Some(pos) = rest.find("[anki:play:") {
-            self.text_math(&rest[..pos], st, para);
+            self.text_math(&rest[..pos], st, para, frame);
             let after = &rest[pos + "[anki:play:".len()..];
             let parsed = (|| {
                 let mut chars = after.char_indices();
@@ -766,48 +775,66 @@ impl Walker<'_> {
                     rest = &after[len..];
                 }
                 None => {
-                    self.text_math("[anki:play:", st, para);
+                    self.text_math("[anki:play:", st, para, frame);
                     rest = after;
                 }
             }
         }
-        self.text_math(rest, st, para);
+        self.text_math(rest, st, para, frame);
     }
 
-    fn text_math(&mut self, t: &str, st: &Computed, para: &mut Para) {
-        if t.is_empty() {
-            return;
-        }
+    fn text_math(&mut self, t: &str, st: &Computed, para: &mut Para, frame: Frame) {
         let normal = self.tstyle(st);
-        let mut dimmed = normal.clone();
-        dimmed.meta.style.dim = true;
-        let b = t.as_bytes();
-        let mut last = 0;
-        let mut i = 0;
-        while i + 1 < b.len() {
-            if b[i] == b'\\' && matches!(b[i + 1], b'(' | b')' | b'[' | b']') {
-                let opening = matches!(b[i + 1], b'(' | b'[');
-                if opening && !self.in_math {
-                    para.push_text(&t[last..i], &normal, st.transform);
-                    last = i;
-                    self.in_math = true;
-                    self.notice("maths is shown as TeX source");
-                } else if !opening && self.in_math {
-                    para.push_text(&t[last..i + 2], &dimmed, st.transform);
-                    last = i + 2;
-                    self.in_math = false;
+        for segment in crate::math::segments(t) {
+            match segment {
+                crate::math::Segment::Text(t) => para.push_text(t, &normal, st.transform),
+                crate::math::Segment::Formula { source, display } => {
+                    if !display {
+                        if let Some(text) = crate::math::unicode(source) {
+                            para.push_text(&text, &normal, st.transform);
+                            continue;
+                        }
+                    }
+                    if self.opts.images {
+                        let fg = normal.meta.style.fg.unwrap_or(self.default_fg);
+                        match crate::math::svg(source, display, self.cell_px.1, fg) {
+                            Ok(svg) => {
+                                let dims = media::svg_dimensions(svg.as_bytes());
+                                let mut math_style = st.clone();
+                                math_style.width = None;
+                                math_style.height = None;
+                                if display {
+                                    para.push_break();
+                                }
+                                let atom = self.image_atom(
+                                    ImageSource::Svg(svg),
+                                    dims,
+                                    &math_style,
+                                    frame,
+                                    source.into(),
+                                );
+                                para.push_atom(atom);
+                                if display {
+                                    para.push_break();
+                                }
+                                continue;
+                            }
+                            Err(_) => self.notice("unsupported math; showing TeX source"),
+                        }
+                    } else {
+                        self.notice("math needs graphics; showing TeX source");
+                    }
+                    let mut fallback = normal.clone();
+                    fallback.meta.style.dim = true;
+                    let text = if display {
+                        format!("\\[{source}\\]")
+                    } else {
+                        format!("\\({source}\\)")
+                    };
+                    para.push_text(&text, &fallback, st.transform);
                 }
-                i += 2;
-                continue;
             }
-            i += 1;
         }
-        let tail = &t[last..];
-        para.push_text(
-            tail,
-            if self.in_math { &dimmed } else { &normal },
-            st.transform,
-        );
     }
 
     fn placeholder(&mut self, label: &str, st: &Computed, para: &mut Para) {
@@ -883,7 +910,7 @@ impl Walker<'_> {
                 // A LaTeX image's alt text is its source: more useful than a label.
                 let mut s = st.clone();
                 s.dim = true;
-                w.text(&alt, &s, para);
+                w.text(&alt, &s, para, frame);
             } else {
                 w.placeholder(&label, st, para);
             }
@@ -906,7 +933,29 @@ impl Walker<'_> {
                     Err(_) => fallback(self, format!("[missing image: {name}]"), para),
                     Ok(dims) => {
                         let alt = if alt.is_empty() { name } else { alt };
-                        let atom = self.image_atom(ImageSource::File(path), dims, st, frame, alt);
+                        let source = if el
+                            .ancestors()
+                            .filter_map(ElementRef::wrap)
+                            .any(|e| e.value().id() == Some("image-occlusion-container"))
+                        {
+                            match (&self.occlusion, dims) {
+                                (Some(io), Some((w, h))) => ImageSource::Occlusion {
+                                    path,
+                                    overlay: io.overlay(
+                                        w,
+                                        h,
+                                        self.opts.expanded.contains("occlusion:masks-hidden"),
+                                        frame.width as f32 * self.cell_px.0 as f32,
+                                    ),
+                                },
+                                _ => ImageSource::File(path),
+                            }
+                        } else if latex && self.opts.night_mode {
+                            ImageSource::InvertedFile(path)
+                        } else {
+                            ImageSource::File(path)
+                        };
+                        let atom = self.image_atom(source, dims, st, frame, alt);
                         para.push_atom(atom);
                     }
                 }
@@ -1022,7 +1071,12 @@ impl Walker<'_> {
         };
         for (base, annot) in pairs {
             let base = collapse(base);
-            let annot = collapse(annot);
+            let mut annot = collapse(annot);
+            if self.opts.ruby == RubyMode::Above {
+                for (_, meta) in &mut annot {
+                    meta.style.text_scale = 50;
+                }
+            }
             let bw: usize = base.iter().map(|(s, _)| str_width(s)).sum();
             let aw: usize = annot.iter().map(|(s, _)| str_width(s)).sum();
             let w = bw.max(aw);
@@ -1185,7 +1239,7 @@ impl Walker<'_> {
             let mut para = Self::new_para(st);
             for child in el.children() {
                 match child.value() {
-                    Node::Text(t) => self.text(t, st, &mut para),
+                    Node::Text(t) => self.text(t, st, &mut para, frame),
                     Node::Element(e) if e.name() != "summary" => {
                         if let Some(c) = ElementRef::wrap(child) {
                             self.element(c, st, out, frame, &mut para);

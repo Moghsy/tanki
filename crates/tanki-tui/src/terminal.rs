@@ -29,37 +29,83 @@ use tanki_core::CollectionActor;
 use tanki_term::{Capabilities, GraphicsMode};
 
 pub struct Options {
+    pub playback: tanki_media::PlaybackOptions,
     pub graphics: GraphicsMode,
     pub start: Start,
     pub keymap: Keymap,
     /// tanki's config.toml; `None` means sync is unavailable.
     pub config: Option<std::path::PathBuf>,
+    /// The Anki base folder (profiles on the Tools screen).
+    pub base: Option<std::path::PathBuf>,
 }
 
 impl Default for Options {
     fn default() -> Self {
         Self {
+            playback: Default::default(),
             graphics: GraphicsMode::Auto,
             start: Start::Decks,
             keymap: Keymap::default(),
             config: None,
+            base: None,
         }
     }
 }
 
 /// The caller keeps ownership of the actor and closes it after this returns.
-pub fn run(actor: &CollectionActor, options: Options) -> io::Result<()> {
+/// `Some(name)`: the user chose to switch to that profile of the same base
+/// folder; the caller closes this collection and runs again on that one.
+pub fn run(actor: &CollectionActor, options: Options) -> io::Result<Option<String>> {
+    let config = options
+        .config
+        .as_ref()
+        .map(|p| tanki_core::config::Config::load(p))
+        .transpose()
+        .map_err(io::Error::other)?
+        .unwrap_or_default();
+    if !config.connect.in_tui {
+        return run_inner(actor, options);
+    }
+    let api =
+        tanki_connect::ServeOptions::from_settings(&config.connect).map_err(io::Error::other)?;
+    let listener = std::net::TcpListener::bind(api.bind)?;
+    let stop = AtomicBool::new(false);
+    thread::scope(|scope| {
+        let worker = scope.spawn(|| {
+            tanki_connect::serve_listener(actor, &api, listener, &stop).map_err(|e| e.to_string())
+        });
+        struct StopOnExit<'a>(&'a AtomicBool);
+        impl Drop for StopOnExit<'_> {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Relaxed);
+            }
+        }
+        let guard = StopOnExit(&stop);
+        let result = run_inner(actor, options);
+        drop(guard);
+        let server = worker
+            .join()
+            .map_err(|_| io::Error::other("AnkiConnect worker panicked"))?;
+        server.map_err(io::Error::other)?;
+        result
+    })
+}
+fn run_inner(actor: &CollectionActor, options: Options) -> io::Result<Option<String>> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(io::Error::other(
             "interactive study requires a terminal on stdin and stdout",
         ));
     }
     let capabilities = tanki_term::probe(options.graphics)?;
-    let audio = tanki_media::Audio::start(tanki_media::AudioConfig {
-        media_dir: actor.media_dir(),
-        ..Default::default()
-    });
+    let audio = tanki_media::Audio::start_with_options(
+        tanki_media::AudioConfig {
+            media_dir: actor.media_dir(),
+            ..Default::default()
+        },
+        options.playback,
+    );
     let audio_events = audio.subscribe();
+    let terminal_output = audio.terminal_output_lock();
     let images = TermImages::new(
         tanki_term::Images::new(&capabilities),
         tanki_render::ImageCache::new(),
@@ -77,7 +123,7 @@ pub fn run(actor: &CollectionActor, options: Options) -> io::Result<()> {
         dir: actor.profile_dir().to_path_buf(),
         media_dir: actor.media_dir(),
     };
-    let links = Links::default();
+    let links = Links::with_text_sizing(capabilities.text_sizing);
     let services = Services {
         renderer: Box::new(LinkedRenderer::new(AnkiRenderer, links.clone())),
         images: Box::new(images),
@@ -85,9 +131,14 @@ pub fn run(actor: &CollectionActor, options: Options) -> io::Result<()> {
         display: Display::from_capabilities(&capabilities),
         opener: Box::new(crate::services::system_open),
     };
+    // Enter and clear before App::new can queue autoplay video.
+    let _session = Session::enter(&capabilities)?;
+    let mut terminal = Terminal::new(HyperlinkBackend::new(io::stdout(), links))?;
+    terminal.clear()?;
     let mut app = App::new(actor, services, profile, options.start, Now::current());
     app.set_keymap(options.keymap);
     app.set_config(options.config);
+    app.set_base_dir(options.base);
     let gate = Arc::new(Gate::default());
     let keyboard = capabilities.keyboard_enhancement;
     let editor_gate = gate.clone();
@@ -96,10 +147,8 @@ pub fn run(actor: &CollectionActor, options: Options) -> io::Result<()> {
             crate::editor_flow::spawn_editor(command, path)
         })
     }));
-    let _session = Session::enter(&capabilities)?;
-    let mut terminal = Terminal::new(HyperlinkBackend::new(io::stdout(), links))?;
-    terminal.clear()?;
     let reader = Reader::start(gate)?;
+    let mut video_was_visible = false;
     let result = (|| {
         while !app.should_quit() {
             while let Ok(change) = changes.try_recv() {
@@ -112,25 +161,38 @@ pub fn run(actor: &CollectionActor, options: Options) -> io::Result<()> {
                 app.handle(AppEvent::ImageReady, Now::current());
             }
             app.handle(AppEvent::Tick, Now::current());
-            let (cleanup, clear) = app.take_terminal_requests();
-            terminal.backend_mut().write_all(cleanup.as_bytes())?;
-            if clear {
-                terminal.clear()?;
+            // The audio worker takes this same short lock before mpv is
+            // allowed to write its first in-terminal video frame.
+            let output_guard = terminal_output.lock().unwrap();
+            if app.services.audio.owns_terminal() {
+                video_was_visible = true;
+            } else {
+                if video_was_visible {
+                    app.handle(AppEvent::Resize, Now::current());
+                    terminal.clear()?;
+                    video_was_visible = false;
+                }
+                let (cleanup, clear) = app.take_terminal_requests();
+                terminal.backend_mut().write_all(cleanup.as_bytes())?;
+                if clear {
+                    terminal.clear()?;
+                }
+                if capabilities.synchronized_output {
+                    queue!(
+                        terminal.backend_mut(),
+                        crossterm::terminal::BeginSynchronizedUpdate
+                    )?;
+                }
+                let drawn = terminal.draw(|frame| app.draw(frame)).map(|_| ());
+                if capabilities.synchronized_output {
+                    execute!(
+                        terminal.backend_mut(),
+                        crossterm::terminal::EndSynchronizedUpdate
+                    )?;
+                }
+                drawn?;
             }
-            if capabilities.synchronized_output {
-                queue!(
-                    terminal.backend_mut(),
-                    crossterm::terminal::BeginSynchronizedUpdate
-                )?;
-            }
-            let drawn = terminal.draw(|frame| app.draw(frame)).map(|_| ());
-            if capabilities.synchronized_output {
-                execute!(
-                    terminal.backend_mut(),
-                    crossterm::terminal::EndSynchronizedUpdate
-                )?;
-            }
-            drawn?;
+            drop(output_guard);
             match reader.events.recv_timeout(Duration::from_millis(50)) {
                 Ok(Ok(event)) => app.handle(event, Now::current()),
                 Ok(Err(error)) => return Err(error),
@@ -150,7 +212,8 @@ pub fn run(actor: &CollectionActor, options: Options) -> io::Result<()> {
         .and_then(|()| terminal.backend_mut().flush());
     // Stop the reader before disabling raw mode, including on a drawing failure.
     drop(reader);
-    result.and(cleaned)
+    let switch = app.take_profile_switch();
+    result.and(cleaned).map(|()| switch)
 }
 
 struct Session {

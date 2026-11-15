@@ -2,12 +2,13 @@
 //! behaviour can be tested with a fake that needs no sound device.
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use crate::{AudioEvent, BackendStatus, MediaTag};
+use crate::{AudioEvent, BackendStatus, MediaTag, Recording};
 
 /// How often the worker asks the backend whether the current file ended.
 const POLL: Duration = Duration::from_millis(40);
@@ -16,6 +17,15 @@ const POLL: Duration = Duration::from_millis(40);
 pub(crate) trait Backend {
     /// Start `path`, replacing whatever plays now.
     fn play(&mut self, path: &Path) -> Result<(), String>;
+    fn play_tts(&mut self, _tag: &MediaTag) -> Result<(), String> {
+        Err("text to speech is unavailable in this backend".into())
+    }
+    fn takes_terminal(&self, _path: &Path) -> bool {
+        false
+    }
+    fn take_error(&mut self) -> Option<String> {
+        None
+    }
     fn stop(&mut self);
     fn toggle_pause(&mut self);
     /// Relative seek; `Err` carries a status-line message.
@@ -32,7 +42,9 @@ pub(crate) enum Selected {
 
 enum Cmd {
     Play(Vec<MediaTag>, bool),
+    Recording(Recording, bool),
     Stop,
+    StopWait(Sender<()>),
     Pause,
     Seek(f64),
     Shutdown,
@@ -43,6 +55,8 @@ type Subscribers = Arc<Mutex<Vec<Sender<AudioEvent>>>>;
 pub(crate) struct Handle {
     tx: Sender<Cmd>,
     busy: Arc<Mutex<bool>>,
+    terminal: Arc<AtomicBool>,
+    terminal_lock: Arc<Mutex<()>>,
     subs: Subscribers,
     status: BackendStatus,
     thread: Option<JoinHandle<()>>,
@@ -57,6 +71,10 @@ impl Handle {
         let (tx, rx) = mpsc::channel();
         let (status_tx, status_rx) = mpsc::channel();
         let busy = Arc::new(Mutex::new(false));
+        let terminal = Arc::new(AtomicBool::new(false));
+        let worker_terminal = terminal.clone();
+        let terminal_lock = Arc::new(Mutex::new(()));
+        let worker_terminal_lock = terminal_lock.clone();
         let subs: Subscribers = Arc::new(Mutex::new(Vec::new()));
         let worker_busy = busy.clone();
         let worker_subs = subs.clone();
@@ -74,9 +92,12 @@ impl Handle {
                     status,
                     rx,
                     busy: worker_busy,
+                    terminal: worker_terminal,
+                    terminal_lock: worker_terminal_lock,
                     subs: worker_subs,
                     queue: VecDeque::new(),
                     current: None,
+                    recording: None,
                     worked: false,
                 }
                 .run();
@@ -88,10 +109,19 @@ impl Handle {
         Self {
             tx,
             busy,
+            terminal,
+            terminal_lock,
             subs,
             status,
             thread,
         }
+    }
+
+    pub(crate) fn terminal_output_lock(&self) -> Arc<Mutex<()>> {
+        self.terminal_lock.clone()
+    }
+    pub(crate) fn owns_terminal(&self) -> bool {
+        self.terminal.load(Ordering::SeqCst)
     }
 
     pub(crate) fn status(&self) -> BackendStatus {
@@ -102,19 +132,30 @@ impl Handle {
         if matches!(self.status, BackendStatus::Off) {
             return;
         }
-        if !matches!(self.status, BackendStatus::NoDevice(_)) {
-            let mut busy = self.busy.lock().unwrap();
-            *busy = *busy || interrupt || !tags.is_empty();
-            // Sending under the lock keeps `busy` and the channel consistent
-            // with the worker's idle check.
-            let _ = self.tx.send(Cmd::Play(tags, interrupt));
-        } else {
-            let _ = self.tx.send(Cmd::Play(tags, interrupt));
+        let mut busy = self.busy.lock().unwrap();
+        *busy = *busy || interrupt || !tags.is_empty();
+        let _ = self.tx.send(Cmd::Play(tags, interrupt));
+    }
+
+    pub(crate) fn play_recording(&self, recording: Recording, interrupt: bool) {
+        if matches!(self.status, BackendStatus::Off) {
+            return;
         }
+        let mut busy = self.busy.lock().unwrap();
+        *busy = true;
+        let _ = self.tx.send(Cmd::Recording(recording, interrupt));
     }
 
     pub(crate) fn stop(&self) {
         let _ = self.tx.send(Cmd::Stop);
+    }
+    pub(crate) fn stop_and_wait(&self) -> Result<(), String> {
+        let (tx, rx) = mpsc::channel();
+        self.tx
+            .send(Cmd::StopWait(tx))
+            .map_err(|_| "audio worker stopped".to_string())?;
+        rx.recv_timeout(Duration::from_secs(2))
+            .map_err(|_| "audio worker did not acknowledge shutdown".to_string())
     }
     pub(crate) fn toggle_pause(&self) {
         let _ = self.tx.send(Cmd::Pause);
@@ -147,9 +188,12 @@ struct Worker {
     status: BackendStatus,
     rx: Receiver<Cmd>,
     busy: Arc<Mutex<bool>>,
+    terminal: Arc<AtomicBool>,
+    terminal_lock: Arc<Mutex<()>>,
     subs: Subscribers,
     queue: VecDeque<MediaTag>,
     current: Option<MediaTag>,
+    recording: Option<Recording>,
     /// Something started or failed since the last `Idle`.
     worked: bool,
 }
@@ -207,8 +251,15 @@ impl Worker {
                 Err(RecvTimeoutError::Timeout) => {
                     let done = self.backend.as_mut().is_some_and(|b| b.finished());
                     if done {
+                        self.terminal.store(false, Ordering::SeqCst);
                         if let Some(tag) = self.current.take() {
-                            self.emit(AudioEvent::Finished(tag));
+                            if let Some(error) = self.backend.as_mut().and_then(|b| b.take_error())
+                            {
+                                self.emit(AudioEvent::Error(error));
+                            } else {
+                                self.emit(AudioEvent::Finished(tag));
+                            }
+                            self.recording = None;
                         }
                     }
                 }
@@ -218,19 +269,26 @@ impl Worker {
         if let Some(b) = self.backend.as_mut() {
             b.stop();
         }
+        self.terminal.store(false, Ordering::SeqCst);
     }
 
     /// Returns true on shutdown.
     fn handle(&mut self, cmd: Cmd) -> bool {
         match cmd {
             Cmd::Shutdown => return true,
-            Cmd::Play(tags, interrupt) => match self.status {
+            Cmd::Play(tags, interrupt) => match self.status.clone() {
                 BackendStatus::Off => {}
                 BackendStatus::NoDevice(ref reason) => {
-                    if !tags.is_empty() {
-                        let msg = format!("no audio output: {reason}");
-                        self.emit(AudioEvent::Error(msg));
+                    if interrupt {
+                        self.halt();
                     }
+                    if tags.iter().any(|tag| matches!(tag, MediaTag::Sound(_))) {
+                        self.emit(AudioEvent::Error(format!("no audio output: {reason}")));
+                    }
+                    self.queue.extend(
+                        tags.into_iter()
+                            .filter(|tag| matches!(tag, MediaTag::Tts { .. })),
+                    );
                 }
                 _ => {
                     if interrupt {
@@ -239,7 +297,32 @@ impl Worker {
                     self.queue.extend(tags);
                 }
             },
+            Cmd::Recording(recording, interrupt) => {
+                if interrupt {
+                    self.halt();
+                }
+                if self.current.is_some() {
+                    self.emit(AudioEvent::Error(
+                        "finish current playback before replaying a voice recording".into(),
+                    ));
+                } else if let Some(backend) = self.backend.as_mut() {
+                    match backend.play(&recording.path()) {
+                        Ok(()) => {
+                            let tag = MediaTag::Sound("[own voice]".into());
+                            self.recording = Some(recording);
+                            self.current = Some(tag.clone());
+                            self.worked = true;
+                            self.emit(AudioEvent::Started(tag));
+                        }
+                        Err(e) => self.emit(AudioEvent::Error(e)),
+                    }
+                }
+            }
             Cmd::Stop => self.halt(),
+            Cmd::StopWait(reply) => {
+                self.halt();
+                let _ = reply.send(());
+            }
             Cmd::Pause => {
                 if self.current.is_some() {
                     if let Some(b) = self.backend.as_mut() {
@@ -262,40 +345,42 @@ impl Worker {
     /// Stop the current tag and drop the queue, without a `Finished` event.
     fn halt(&mut self) {
         self.queue.clear();
+        let terminal_lock = self.terminal_lock.clone();
+        let _output = terminal_lock.lock().unwrap();
+        self.recording = None;
         if self.current.take().is_some() {
             if let Some(b) = self.backend.as_mut() {
                 b.stop();
             }
         }
+        self.terminal.store(false, Ordering::SeqCst);
     }
 
     fn start(&mut self, tag: MediaTag) {
         self.worked = true;
-        let name = match &tag {
-            MediaTag::Sound(name) => name.clone(),
-            MediaTag::Tts { .. } => {
-                self.emit(AudioEvent::Error(
-                    "text to speech is not supported yet".into(),
-                ));
-                return;
-            }
+        let result = match &tag {
+            MediaTag::Sound(name) => resolve(&self.media_dir, name).and_then(|path| {
+                let _output = self.terminal_lock.lock().unwrap();
+                let backend = self.backend.as_mut().ok_or("no audio output device")?;
+                self.terminal
+                    .store(backend.takes_terminal(&path), Ordering::SeqCst);
+                backend.play(&path)
+            }),
+            MediaTag::Tts { .. } => self
+                .backend
+                .as_mut()
+                .ok_or("no text to speech backend".into())
+                .and_then(|b| b.play_tts(&tag)),
         };
-        let path = match resolve(&self.media_dir, &name) {
-            Ok(p) => p,
-            Err(msg) => {
-                self.emit(AudioEvent::Error(msg));
-                return;
-            }
-        };
-        let Some(backend) = self.backend.as_mut() else {
-            return;
-        };
-        match backend.play(&path) {
+        match result {
             Ok(()) => {
                 self.current = Some(tag.clone());
                 self.emit(AudioEvent::Started(tag));
             }
-            Err(msg) => self.emit(AudioEvent::Error(msg)),
+            Err(msg) => {
+                self.terminal.store(false, Ordering::SeqCst);
+                self.emit(AudioEvent::Error(msg));
+            }
         }
     }
 }
@@ -325,7 +410,6 @@ pub(crate) fn resolve(media_dir: &Path, name: &str) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicBool, Ordering};
 
     #[derive(Default)]
     struct Shared {
@@ -336,6 +420,9 @@ mod tests {
     struct Fake(Arc<Shared>);
 
     impl Backend for Fake {
+        fn takes_terminal(&self, path: &Path) -> bool {
+            path.extension().is_some_and(|extension| extension == "mp4")
+        }
         fn play(&mut self, path: &Path) -> Result<(), String> {
             let n = path.file_name().unwrap().to_string_lossy().into_owned();
             if n.starts_with("bad") {
@@ -399,6 +486,39 @@ mod tests {
     }
 
     #[test]
+    fn terminal_is_reserved_for_video_and_released_on_stop_or_completion() {
+        let (_d, h, shared, rx) = setup(&["movie.mp4", "a.mp3"]);
+        h.play(vec![snd("movie.mp4")], false);
+        assert_eq!(next(&rx), AudioEvent::Started(snd("movie.mp4")));
+        assert!(h.owns_terminal());
+        shared.finished.store(true, Ordering::SeqCst);
+        assert_eq!(next(&rx), AudioEvent::Finished(snd("movie.mp4")));
+        assert!(!h.owns_terminal());
+        h.play(vec![snd("movie.mp4")], true);
+        assert_eq!(next(&rx), AudioEvent::Idle);
+        assert_eq!(next(&rx), AudioEvent::Started(snd("movie.mp4")));
+        h.stop();
+        assert_eq!(next(&rx), AudioEvent::Idle);
+        assert!(!h.owns_terminal());
+        h.play(vec![snd("a.mp3")], true);
+        assert_eq!(next(&rx), AudioEvent::Started(snd("a.mp3")));
+        assert!(!h.owns_terminal());
+    }
+
+    #[test]
+    fn output_lock_serializes_ui_drawing_before_the_first_video_frame() {
+        let (_d, h, _shared, rx) = setup(&["movie.mp4"]);
+        let lock = h.terminal_output_lock();
+        let guard = lock.lock().unwrap();
+        h.play(vec![snd("movie.mp4")], false);
+        assert!(rx.recv_timeout(Duration::from_millis(50)).is_err());
+        assert!(!h.owns_terminal());
+        drop(guard);
+        assert_eq!(next(&rx), AudioEvent::Started(snd("movie.mp4")));
+        assert!(h.owns_terminal());
+    }
+
+    #[test]
     fn interrupt_replaces_current_and_queue() {
         let (_d, h, sh, rx) = setup(&["a.mp3", "b.mp3", "c.mp3"]);
         h.play(vec![snd("a.mp3"), snd("b.mp3")], false);
@@ -433,6 +553,16 @@ mod tests {
     }
 
     #[test]
+    fn shutdown_acknowledges_backend_stop_before_returning() {
+        let (_d, h, shared, rx) = setup(&["movie.mp4"]);
+        h.play(vec![snd("movie.mp4")], false);
+        assert_eq!(next(&rx), AudioEvent::Started(snd("movie.mp4")));
+        h.stop_and_wait().unwrap();
+        assert!(!h.owns_terminal());
+        assert_eq!(shared.log.lock().unwrap().last().unwrap(), "stop");
+    }
+
+    #[test]
     fn missing_and_unsafe_files_error_then_continue() {
         let (_d, h, sh, rx) = setup(&["ok.mp3"]);
         h.play(
@@ -456,7 +586,7 @@ mod tests {
     }
 
     #[test]
-    fn tts_is_unsupported() {
+    fn backend_without_tts_reports_it() {
         let (_d, h, _sh, rx) = setup(&[]);
         h.play(
             vec![MediaTag::Tts {
@@ -469,7 +599,7 @@ mod tests {
         );
         assert_eq!(
             next(&rx),
-            AudioEvent::Error("text to speech is not supported yet".into())
+            AudioEvent::Error("text to speech is unavailable in this backend".into())
         );
     }
 

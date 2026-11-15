@@ -9,13 +9,22 @@ publish.workspace = true
 name = "tanki"
 path = "src/main.rs"
 
+[features]
+default = []
+blitz = ["tanki-tui/blitz"]
+
 [dependencies]
 tanki-core = { path = "../tanki-core" }
 tanki-term = { path = "../tanki-term" }
 tanki-tui = { path = "../tanki-tui" }
+tanki-media = { path = "../tanki-media" }
+tanki-connect = { path = "../tanki-connect" }
 serde_json = "1"
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.5", features = ["derive", "string"] }
+clap_complete = "4.5"
+clap_mangen = "0.2"
 rpassword = "7"
+signal-hook = "0.3"
 unicode-width = "0.2"
 
 [dev-dependencies]

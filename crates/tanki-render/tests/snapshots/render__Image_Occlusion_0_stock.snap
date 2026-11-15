@@ -9,7 +9,7 @@ question, night=false
   10..30: Rgb(0, 0, 0) Reset DIM
 answer_row: None
 widgets: []
-notices: ["image occlusion masks are not drawn yet"]
+notices: ["image occlusion: M toggles masks", "image occlusion requires graphics (try --graphics=blocks)"]
 
 answer, night=false
 00|       Synthetic image occlusion        |
@@ -20,7 +20,7 @@ answer, night=false
   16..24: Rgb(0, 0, 0) Reset NONE
 answer_row: None
 widgets: [Widget { key: "play:a:0", kind: Replay { side: Answer, index: 0 }, row: 2, col: 23, width: 1 }]
-notices: ["image occlusion masks are not drawn yet"]
+notices: ["image occlusion: M toggles masks", "image occlusion requires graphics (try --graphics=blocks)"]
 
 question, night=true
 00|       Synthetic image occlusion        |
@@ -28,7 +28,7 @@ question, night=true
   10..30: Reset Reset DIM
 answer_row: None
 widgets: []
-notices: ["image occlusion masks are not drawn yet"]
+notices: ["image occlusion: M toggles masks", "image occlusion requires graphics (try --graphics=blocks)"]
 
 answer, night=true
 00|       Synthetic image occlusion        |
@@ -37,4 +37,4 @@ answer, night=true
 02|                Answer ▶                |
 answer_row: None
 widgets: [Widget { key: "play:a:0", kind: Replay { side: Answer, index: 0 }, row: 2, col: 23, width: 1 }]
-notices: ["image occlusion masks are not drawn yet"]
+notices: ["image occlusion: M toggles masks", "image occlusion requires graphics (try --graphics=blocks)"]

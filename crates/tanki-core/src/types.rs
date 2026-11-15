@@ -125,6 +125,8 @@ pub struct QueuedCard {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Queue {
+    #[serde(default)]
+    pub custom_scheduling_error: Option<String>,
     pub new: u32,
     pub learning: u32,
     pub review: u32,
@@ -156,6 +158,15 @@ pub enum AudioTag {
 /// `review_answer` methods.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct RenderedCard {
+    /// The note type used to choose a persisted rendering tier.
+    #[serde(default)]
+    pub notetype_id: i64,
+    /// All front template sources, for classification once per note type.
+    #[serde(default)]
+    pub template_question: String,
+    /// All back template sources, for classification once per note type.
+    #[serde(default)]
+    pub template_answer: String,
     pub question: String,
     pub answer: String,
     pub css: String,
@@ -335,11 +346,17 @@ pub struct UndoStatus {
 /// cached scheduling states: fetch a fresh `Queue` before the next `Answer`.
 #[derive(Debug, Clone)]
 pub enum Command {
+    /// Opt in/out of external legacy LaTeX image generation -> `Changes`.
+    SetLatexGeneration {
+        enabled: bool,
+    },
     Data(crate::DataCommand),
     /// Notes, note types, tags, media (Phase 3) -> `Edit`.
     Notes(crate::NoteCommand),
     /// Search and browser (Phase 3) -> `Edit`.
     Browse(crate::BrowseCommand),
+    /// Management screens (Phase 5) -> `Manage`.
+    Manage(crate::ManageCommand),
     /// -> `DeckTree` (with counts; rolls the day over if needed).
     DeckTree,
     /// Cards of the current deck -> `Queue`. Idempotent; caches each card's
@@ -462,6 +479,7 @@ pub enum Command {
 pub enum Response {
     Data(crate::DataResponse),
     Edit(crate::EditResponse),
+    Manage(crate::ManageResponse),
     DeckTree(Deck),
     Queue(Queue),
     Rendered(RenderedCard),
@@ -491,6 +509,7 @@ impl Response {
             | Self::Answered(AnswerOutcome { changes, .. })
             | Self::Data(crate::DataResponse::Imported { changes, .. }) => Some(changes),
             Self::Edit(edit) => edit.changes(),
+            Self::Manage(manage) => manage.changes(),
             _ => None,
         }
     }

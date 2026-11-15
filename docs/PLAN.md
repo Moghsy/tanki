@@ -1,6 +1,6 @@
 # tanki — plan for a terminal Anki client
 
-Status: **Phase 1 complete (2026-11-13). Phase 2 complete (2026-11-14); see below. All Phase 1 streams are integrated; the lead's full build/tests/clippy and exact Python study replay pass. The user confirmed fixture images, audio and terminal restoration. Results are in section 13 and `docs/implementation/phase-1-results.md`. Phase 2 (sync and data safety) is complete (2026-11-14): its automated exit test passes, the real-profile guard is removed, and the user confirmed the desktop-running checks on the real profile and the TUI data screens on a fixture; results are in section 13 and `docs/implementation/phase-2-interfaces.md`. Phase 3 (add, edit, browse) is complete (2026-11-14): its automated exit test passes and the user confirmed the add screen, browser and `$EDITOR` hand-over in their terminal; results are in `docs/implementation/phase-3-interfaces.md`. The pin moved to the 26.09.4 release tag during Phase 0 (4.1).** Written 2026-11-12 against the Anki checkout at `../anki` (`main` at `4aa9c0836`, 2026-08-30, just past the 26.08.1 tag).
+Status: **Phase 1 complete (2026-11-13). Phase 2 complete (2026-11-14); see below. All Phase 1 streams are integrated; the lead's full build/tests/clippy and exact Python study replay pass. The user confirmed fixture images, audio and terminal restoration. Results are in section 13 and `docs/implementation/phase-1-results.md`. Phase 2 (sync and data safety) is complete (2026-11-14): its automated exit test passes, the real-profile guard is removed, and the user confirmed the desktop-running checks on the real profile and the TUI data screens on a fixture; results are in section 13 and `docs/implementation/phase-2-interfaces.md`. Phase 3 (add, edit, browse) is complete (2026-11-14): its automated exit test passes and the user confirmed the add screen, browser and `$EDITOR` hand-over in their terminal; results are in `docs/implementation/phase-3-interfaces.md`. Phase 4 (rich rendering) is implemented and its automated exit passes (2026-11-15); the manual terminal checklist is pending. Phase 5 (management) is implemented and its automated exit passes (2026-11-15); the manual terminal checklist is pending; results are in `docs/implementation/phase-5-interfaces.md`. The pin moved to the 26.09.4 release tag during Phase 0 (4.1).** Written 2026-11-12 against the Anki checkout at `../anki` (`main` at `4aa9c0836`, 2026-08-30, just past the 26.08.1 tag).
 
 ## 0. How to use this document
 
@@ -248,7 +248,7 @@ Known gaps (R1):
 | CLI | clap, clap_complete, clap_mangen |
 | HTML/CSS | html5ever + cssparser/selectors |
 | Raster | image, resvg, tiny-skia |
-| Math | RaTeX 0.1 (KaTeX-compatible, mhchem), unicodeit for text fallback |
+| Math | RaTeX 0.1 (KaTeX-compatible, mhchem), native conservative Unicode fallback |
 | Audio | rodio 0.23 + symphonia with `mp3, aac, isomp4, alac` features; mpv over JSON IPC when installed |
 | Clipboard | arboard 3.7 |
 | Optional tiers | Blitz (pure-Rust HTML/CSS renderer), chromiumoxide (headless Chrome), rquickjs |
@@ -336,7 +336,9 @@ The six stock note types (R3 §6) and anything the Anki editor produces must ren
 
 ### 6.3 Math
 
-- MathJax `\( \)` and `\[ \]`: RaTeX renders to SVG, resvg rasterises, shown as a graphics block. Measured 0.1–0.4 ms per formula warm (R8). Simple inline formulas become Unicode text via unicodeit; taller inline formulas get a multi-row inline box.
+Phase 4 source correction: `unicodeit` 0.2.2 declares `MIT AND LPPL-1.3c`; the license gate rejected it. It is not a dependency. A small independently written converter handles common Greek symbols and exact Unicode scripts, and other expressions use RaTeX or visible-source fallback.
+
+- MathJax `\( \)` and `\[ \]`: RaTeX renders to SVG, resvg rasterises, shown as a graphics block. Measured 0.1–0.4 ms per formula warm (R8). Simple inline formulas become Unicode text through a small native converter; taller inline formulas get a multi-row inline box.
 - Legacy `[latex]` tags: Anki's Rust code only produces `<img src="latex-<hash>.png">`; the images usually ship in the media folder, so the common case is displaying a file, inverted in night mode (R3). Generating missing ones means running `latex` + `dvipng`/`dvisvgm` exactly as Anki's Python does; this is off by default in Anki for security and stays opt-in.
 - RaTeX is KaTeX-compatible, not MathJax-identical. Unsupported macros fall back to showing the source. An exact MathJax engine (`mathjax_svg`, embeds V8) is a possible optional backend **[web]**.
 
@@ -400,7 +402,7 @@ Verdicts: **T** trivial (wrap an Anki call), **D** doable, **H** hard. "Rewrite"
 | Timer, time-box prompt, auto-advance, leech notice | D | Rewrite of `reviewer.py` state machine (~1250 lines) |
 | Day rollover while left open | D | Re-query on a timer; rollover is lazy inside Anki's calls (R2) |
 | Custom data passthrough | T | Must copy `card.custom_data` into the current state before answering (R2) |
-| Custom scheduling JavaScript | D, late | Collection-wide script; embed QuickJS (~300–500 lines, R2). Until then, warn when the field is non-empty, because those users would silently get standard scheduling |
+| Custom scheduling JavaScript | D, late | Collection-wide script runs in QuickJS (Phase 6); per-card timeout/memory limits, async jobs and error fallback warnings |
 | Old scheduler collections | T | Only v3 exists now; tanki must check the flag and offer the upgrade call (forces a full sync from v1) (R2) |
 | Timezone | — | Anki rewrites the stored UTC offset to the running process's zone; warn when `TZ` differs from the collection's last-known offset (R2) |
 
@@ -719,43 +721,62 @@ Exit test: byte-identical round-trip test over a corpus of field HTML (stock edi
 
 Read first: R3 §1 (filters), §4–§5, §7–§8; R8 §3–§6.
 
-Streams (independent of each other):
+Streams (independent of each other; results: `docs/implementation/phase-4-interfaces.md`, `phase-4-media.md`):
 
-- **Math**: RaTeX → SVG → bitmap blocks; Unicode inline path; multi-row inline boxes; legacy LaTeX image display with night-mode inversion; opt-in generation of missing LaTeX images.
-- **Image occlusion review**: shape parsing from the rendered hidden elements, compositing per R3 §5, both modes, colours from the note type's CSS variables.
-- **Text extras**: ruby, app-side bidi, nested tables, animated GIF, OSC 66 sizing on kitty.
-- **T2 tier**: Blitz bitmap rendering behind a cargo feature; note-type classifier; per-note-type tier override; next-card pre-render.
-- **Media extras**: TTS backends; video (external mpv window, in-terminal option); record and replay own voice.
+- [x] **Math**: RaTeX → SVG → bitmap blocks; Unicode inline path (native converter; `unicodeit` failed the licence gate, 6.3); multi-row inline boxes; legacy LaTeX image display with night-mode inversion; opt-in generation of missing LaTeX images (`--generate-latex`).
+- [x] **Image occlusion review**: shape parsing from the rendered hidden elements, compositing per R3 §5, both modes, colours from the note type's CSS variables; Shift+M toggles masks.
+- [x] **Text extras**: ruby, app-side bidi, nested tables, animated GIF, OSC 66 sizing on kitty 0.40+ (off through tmux).
+- [x] **T2 tier**: Blitz bitmap rendering behind the `blitz` cargo feature; note-type classifier; per-note-type tier override (Ctrl+T, saved in tanki's config); next-card pre-render.
+- [x] **Media extras**: TTS backends; video (external mpv window default, `--video-output=kitty|sixel|blocks`); record (`v`) and replay (Shift+V) own voice.
 
 Exit test: snapshot/bitmap tests for each stream; a fixture image-occlusion deck is reviewable end to end; classifier unit tests over sample templates.
+
+- [x] Automated exit (lead, 2026-11-15): full workspace build with all features, 472 tests (0 failed) and strict clippy pass; the licence gate and replay guards pass. TUI tests review all six `Study::Occlusion` cards through reveal, rating and undo.
+- [ ] Manual: the terminal checklist in `docs/implementation/phase-4-interfaces.md` (occlusion colours, math, GIF, Ctrl+T, TTS/video/recording) is pending the user.
 
 ### Phase 5 — management (L)
 
 Read first: R2 §4–§6; R7 §4; R6 §7–§8; R5 §5–§7; R4 preferences and tools sections.
 
-Streams (independent screens over existing core plumbing):
+Streams (independent screens over existing core plumbing; contracts, ownership and results: `docs/implementation/phase-5-interfaces.md`):
 
-- **Deck options**: full form (8.3), presets, per-deck overrides, FSRS optimise/evaluate/reschedule with progress, simulator chart.
-- **Decks tools**: filtered decks, custom study, unbury modes, deck description.
-- **Note types**: list/add/clone/rename/delete; fields editor; templates editor with live preview and validation errors; change note type mapping; guards from 8.6.
-- **Statistics**: port the graph maths; 14 panels; card info with forgetting curve; JSON/SVG export.
-- **Import/export extras**: CSV import with mapping; text exports; JSON import; find duplicates; reposition; grade now.
-- **Maintenance**: check database, check media, empty cards; preferences; profile management.
+- [x] **Deck options**: full form (8.3), presets, per-deck overrides, FSRS optimise/evaluate/reschedule with progress, simulator chart.
+- [x] **Decks tools**: filtered decks, custom study, unbury modes, deck description. (Also create/rename/"Move to…"/delete prompts on the deck list.)
+- [x] **Note types**: list/add/clone/rename/delete; fields editor; templates editor with live preview and validation errors; change note type mapping; guards from 8.6.
+- [x] **Statistics**: port the graph maths; 14 panels; card info with forgetting curve; JSON/SVG export. (`tanki stats`; no PDF.)
+- [x] **Import/export extras**: CSV import with mapping; text exports; JSON import; find duplicates; reposition; grade now. (Reposition and grade now were already complete in Phase 3's browser, apart from the gaps listed below.)
+- [x] **Maintenance**: check database, check media, empty cards; preferences; profile management.
+- [x] Every screen reachable from the app (`app/manage.rs`, keys in `keymap.rs`); profile switch from the Tools screen through `terminal::run`'s return value.
 
 Exit test: every row of section 8 marked T or D is implemented or listed as deferred in this plan with a reason.
+
+- [x] Automated exit (lead, 2026-11-15): section 8 audit of every T/D row (41 rows), 39 implemented, 2 deferred (below). Full workspace build with all features, 673 tests (0 failed), strict clippy, licence gate and replay/wrapper script tests pass.
+- [ ] Manual: the terminal checklist in `docs/implementation/phase-5-interfaces.md` is pending the user.
+
+Deferred from section 8, with reasons:
+
+- **Custom scheduling JavaScript** (8.1): deferred from Phase 5, completed in Phase 6 with QuickJS. Deck options explains execution; the reviewer warns on script failures.
+- **Mnemosyne import** (8.11, "D, low priority"): not done. It is the last Python-only importer and its users are few; a Mnemosyne collection can be converted to JSON (`ForeignData`) or imported once with desktop. Revisit on request.
+
+Not T/D rows, noted for completeness: the browser's full-screen preview (the preview pane shows both sides in the text tier); the reposition dialog's queue top/bottom hint (desktop reads it with raw SQL, rule 4) and saving randomise/shift as new defaults; periodic media sync during a session (Phase 2).
 
 ### Phase 6 — ecosystem and polish (M–L)
 
 Read first: R9 §5; R2 §3; R7 §5; R8 §3, §8–§9.
 
-Streams (independent):
+Streams (independent), in priority order (set 2026-11-15 by value to a daily terminal user). Do the priority streams; the optional ones only on request.
 
-- **AnkiConnect-compatible API** (`tanki-connect`, `tanki serve`): start with the subset in 8.14; verify against a real client.
-- **T3 tier**: headless Chrome over CDP behind a cargo feature.
-- **Custom scheduling JS**: QuickJS; until then the warning from 8.1 stays.
-- **Image-occlusion creation**: rectangles first.
-- **Built-in markup editor** (8.5), gated on the byte-identical test.
-- **Packaging**: release binaries (glibc on Linux, because fully static musl breaks PipeWire/Pulse audio, R8), shell completions, man pages, Homebrew/AUR/Nix recipes.
+Priority:
+
+1. [x] **Packaging** (small): release binaries (glibc on Linux, because fully static musl breaks PipeWire/Pulse audio, R8), `tanki completions <shell>`, man pages, install instructions. Homebrew/AUR/Nix recipes only when publishing.
+2. [x] **AnkiConnect-compatible API** (`tanki-connect`, `tanki serve`): start with the subset in 8.14; verify against a real client. Worth it only for users who add cards from other tools (Yomitan, browser extensions, editor plugins).
+3. [x] **Custom scheduling JS**: QuickJS with protobuf-JSON parity, async jobs, context/custom-data support, resource limits and failure warnings. Matters only for collections whose custom scheduling script is non-empty (deck options → Advanced); the user checks their own profile (rule 1).
+
+Optional (low value in a terminal; existing paths cover them):
+
+- **T3 tier**: headless Chrome over CDP behind a cargo feature. Only for cards that need JavaScript; the browser escape hatch (`w`) already handles them.
+- **Image-occlusion creation**: rectangles first. Usually done once, in desktop.
+- **Built-in markup editor** (8.5), gated on the byte-identical test. `$EDITOR` and the raw-HTML editor already cover editing.
 
 ---
 
@@ -773,7 +794,7 @@ Streams (independent):
 | Images fail inside multiplexers (herdr has open bugs) | Likely / medium | Query-based detection, live mode switch, `tanki doctor`, test matrix |
 | Blitz and RaTeX are young (0.3 beta, 0.1) | Medium / low–medium | Both optional behind tiers; text fallbacks exist |
 | Trademark objection to the name | Unknown / medium | Disclaimer (decision 1); the binary name is the only place it appears |
-| Custom scheduling JS users get different scheduling | Low share / high for them | Warn loudly until QuickJS support lands |
+| Custom scheduling JS users get different scheduling | Low share / high for them | QuickJS executes the transform; script failures preserve standard states and warn |
 | Lossy field editing corrupts notes | Medium without care / high | Changed-fields-only rule, opaque tokens, byte-identical test |
 | Timezone shift when running over SSH in another zone | Low / medium | Detect and warn (8.1) |
 | Self-hosted sync server exposed over plain HTTP | User-dependent / high | Docs and a startup warning when binding to a non-loopback address |
@@ -806,10 +827,11 @@ Each item names the phase that resolves it. Replace the entry with the result wh
 | **TUI data screens, user-run on a fixture (2026-11-14).** From the deck list: `y` shows "sync is not configured", `B` reports the backup, `I` opens the path prompt, `R` lists backups. Not yet confirmed by eye: the import options form and result log, the restore confirmation, Ctrl+C cancelling a running operation (all covered by cell-buffer snapshots and fake-backend tests in `app/data_tests.rs`). | 7, 8.9, 8.11 | Phase 2 manual check (partial) |
 | **Anki's backups are not atomic (found 2026-11-14; the source wins over R5).** `export_colpkg_from_data` creates `backups/backup-<time>.colpkg` with `File::create` and fills it from a thread, so a killed process leaves a truncated package where desktop's "Open Backup" lists it. tanki has Anki write into `backups/.tanki-incoming/`, syncs and renames the finished file into `backups/`, and applies Anki's interval check and retention itself (ported from `collection/backup.rs`; `backup::tests::retention_matches_anki` compares it with Anki's own thinning over two years of history). Same-second backups take the next free second instead of replacing each other. | R5 §7.2 | Phase 2 verified |
 | **Replacing the collection (2026-11-14).** Restore and full download unpack into `<profile>/.tanki-stage-<ns>/`; after a forced backup and close, `replacement::install` takes Linux OFD write locks over SQLite's lock bytes on both files, re-checks `/proc`, verifies inode identity and the absence of a WAL, removes stale `-shm` index files, moves restored media in, and renames. A clean close leaves `collection.anki2-shm` behind (only an index SQLite rebuilds), which the first version wrongly refused; the CLI smoke test found it. Other platforms refuse replacement. If another process opened the file meanwhile, tanki does not reopen beside it: the actor stops with `InUse`. | 4.4 | Phase 2 verified |
+| **Phase 5 integration (2026-11-15).** Check Database and Check Media back up inside the command, which drops SQLite's cross-process lock like every backup (4.4 correction); the actor now closes and reopens after either, and resets a stale cancel flag first. Test: `lock_across_processes::actor_holds_the_lock_after_check_database_and_media`. Anki's text importer counts rows matching an existing note by first field under `first_field_match`, not `duplicate`; tanki's summaries list that category. "Get Shared" opens `https://ankiweb.net/shared/decks/` (desktop's `aqt.appShared + "decks/"`) in the web browser; that is a web page, not a sync endpoint (rule 7). | 8.2–8.13 | Phase 5 verified |
 | Kitty graphics in VS Code's terminal; placeholders in Konsole; bidi per terminal; text sizing outside kitty | R8 | Phase 4, best effort |
 | Exact browser output for indent/justify markup; prevalence of JS in shared decks | R3, R7 | Phase 3–4 corpus |
-| The AnkiConnect action subset real tools need | R9 | Phase 6 |
-| Full binary size and cold-start time | R8 | Phase 6 |
+| **AnkiConnect subset (2026-11-15): 32 actions.** Fixture HTTP replays cover Yomitan v2 mining/discovery and Obsidian-to-Anki v6 nested batches, updates, media, deck moves and tags. Old-version errors remain envelopes; nested requests use their own versions. These are source-derived protocol replays, not interactive extension sessions. See `crates/tanki-connect/tests/clients.rs` and `docs/implementation/phase-6-interfaces.md`. | R9 | Phase 6 verified |
+| **Release size/startup (2026-11-15):** Linux x86_64 default features, optimized/stripped binary: 63,751,880 bytes (60.8 MiB), dynamically linked to glibc/ALSA. First `--version`: 8.16 ms; median of 10 subsequent new-process launches: 2.73 ms. Fresh synthetic profile creation/list: 52.19 ms; existing synthetic profile open/list median: 11.18 ms (10 launches). Warm filesystem cache, no cache eviction; not a disk-cold benchmark. Host glibc 2.39; release CI targets 2.35 on Ubuntu 22.04 for x86_64/aarch64. Hosted releases have not been run or published. | R8 | Phase 6 measured |
 
 ---
 

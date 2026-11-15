@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+default = []
+blitz = ["dep:blitz-dom", "dep:blitz-html", "dep:blitz-paint", "dep:blitz-traits", "dep:anyrender", "dep:anyrender_vello_cpu"]
+
 [dependencies]
 ratatui.workspace = true
 image.workspace = true
@@ -16,6 +20,16 @@ unicode-linebreak = "0.1.5"
 unicode-bidi = "0.3.18"
 resvg = { version = "0.50.0", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
 ego-tree = "0.11"
+blitz-dom = { version = "=0.3.0-beta.4", default-features = false, features = ["system-fonts", "woff"], optional = true }
+blitz-html = { version = "=0.3.0-beta.4", default-features = false, optional = true }
+blitz-paint = { version = "=0.3.0-beta.4", default-features = false, optional = true }
+blitz-traits = { version = "=0.3.0-beta.4", default-features = false, optional = true }
+anyrender = { version = "0.14", default-features = false, optional = true }
+anyrender_vello_cpu = { version = "0.18", default-features = false, optional = true }
+ratex-parser = "=0.1.15"
+ratex-layout = "=0.1.15"
+ratex-types = "=0.1.15"
+ratex-svg = { version = "=0.1.15", features = ["standalone", "embed-fonts"] }
 
 [dev-dependencies]
 insta = "1.49.0"

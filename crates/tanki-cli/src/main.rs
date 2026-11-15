@@ -1,8 +1,12 @@
+mod check_commands;
 mod note_commands;
 mod package_commands;
+mod profile_commands;
+mod serve_commands;
+mod stats_commands;
 mod sync_commands;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 use tanki_core::{CollectionActor, Command, CoreError, Deck, Response};
 use tanki_term::TerminalDoctor;
@@ -39,8 +43,61 @@ struct Args {
     /// JSON array of {scope, key, action} overrides; null action unbinds a key.
     #[arg(long, global = true)]
     keymap: Option<PathBuf>,
+    /// Enable generation of missing legacy LaTeX images (runs local latex
+    /// and dvipng/dvisvgm). This preference is saved in the collection.
+    #[arg(long, global = true)]
+    generate_latex: bool,
+    /// Text-to-speech engine (requires an installed local backend).
+    #[arg(long, global = true, value_enum, default_value = "auto")]
+    tts: TtsArg,
+    /// Voice model for --tts=piper; no model is downloaded automatically.
+    #[arg(long, global = true)]
+    piper_model: Option<PathBuf>,
+    /// Video display using mpv; in-terminal modes pause TUI drawing.
+    #[arg(long, global = true, value_enum, default_value = "window")]
+    video_output: VideoArg,
     #[command(subcommand)]
     command: Option<CliCommand>,
+}
+#[derive(Clone, Copy, ValueEnum)]
+enum TtsArg {
+    Auto,
+    SpeechDispatcher,
+    Espeak,
+    Say,
+    Piper,
+    Off,
+}
+#[derive(Clone, Copy, ValueEnum)]
+enum VideoArg {
+    Window,
+    Kitty,
+    Sixel,
+    Blocks,
+}
+
+fn playback_options(args: &Args) -> tanki_media::PlaybackOptions {
+    use tanki_media::{TtsBackend, TtsConfig, VideoOutput};
+    tanki_media::PlaybackOptions {
+        tts: TtsConfig {
+            backend: match args.tts {
+                TtsArg::Auto => TtsBackend::Auto,
+                TtsArg::SpeechDispatcher => TtsBackend::SpeechDispatcher,
+                TtsArg::Espeak => TtsBackend::Espeak,
+                TtsArg::Say => TtsBackend::Say,
+                TtsArg::Piper => TtsBackend::Piper,
+                TtsArg::Off => TtsBackend::Off,
+            },
+            piper_model: args.piper_model.clone(),
+            ..Default::default()
+        },
+        video: match args.video_output {
+            VideoArg::Window => VideoOutput::Window,
+            VideoArg::Kitty => VideoOutput::Kitty,
+            VideoArg::Sixel => VideoOutput::Sixel,
+            VideoArg::Blocks => VideoOutput::Blocks,
+        },
+    }
 }
 #[derive(Clone, Copy, ValueEnum)]
 enum GraphicsArg {
@@ -76,9 +133,11 @@ enum CliCommand {
     Sync(sync_commands::SyncArgs),
     /// Run Anki's own sync server for your devices (plain HTTP).
     SyncServer(sync_commands::SyncServerArgs),
-    /// Import an .apkg deck package (never replaces the collection).
+    /// Import an .apkg deck package, CSV/TSV/text or JSON notes (never
+    /// replaces the collection).
     Import(package_commands::ImportArgs),
-    /// Export notes as .apkg, or the whole collection as .colpkg.
+    /// Export notes as .apkg or text (.txt/.tsv/.csv), or the whole
+    /// collection as .colpkg.
     Export(package_commands::ExportArgs),
     /// Create, list or restore backups (restore replaces the collection).
     Backup(package_commands::BackupArgs),
@@ -90,6 +149,22 @@ enum CliCommand {
     Search(note_commands::SearchArgs),
     /// Delete matching notes and their cards.
     Delete(note_commands::DeleteArgs),
+    /// Print collection or deck statistics as text, JSON or SVG.
+    Stats(stats_commands::StatsArgs),
+    /// Check the database, check media, or find empty cards.
+    Check(check_commands::CheckArgs),
+    /// List, create, rename or delete profiles in the base folder.
+    Profiles(profile_commands::ProfileArgs),
+    /// Serve an AnkiConnect-compatible API (default 127.0.0.1:8765).
+    Serve(serve_commands::ServeArgs),
+    /// Print a shell completion script (bash, zsh, fish, elvish, powershell).
+    Completions {
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
+    /// Write man pages (tanki.1 and one per subcommand) into a folder.
+    #[command(hide = true)]
+    ManPages { out_dir: PathBuf },
     /// Dump fixture card HTML/audio for the Phase 0 comparison harness.
     #[command(hide = true)]
     FixtureDump,
@@ -196,6 +271,12 @@ fn with_collection<T>(
             seen_before,
         },
     )?;
+    if args.generate_latex {
+        if let Err(error) = actor.execute(Command::SetLatexGeneration { enabled: true }) {
+            let _ = actor.close();
+            return Err(error.into());
+        }
+    }
     if let (Some(file), Some(loaded)) = (&config, loaded.as_mut()) {
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
         let profile_changed = loaded.last_profile != name;
@@ -360,11 +441,48 @@ fn run(args: Args) -> Result<()> {
                 note_commands::run_search(actor, command, args.json)
             })?;
         }
+        Some(CliCommand::Stats(command)) => {
+            with_collection(&profile_path(&args)?, &args, |actor| {
+                stats_commands::run_stats(actor, command, args.json)
+            })?;
+        }
+        Some(CliCommand::Check(command)) => {
+            with_collection(&profile_path(&args)?, &args, |actor| {
+                check_commands::run_check(actor, command, args.json)
+            })?;
+        }
+        Some(CliCommand::Profiles(command)) => {
+            let base = base_dir(&args)?;
+            let base = tanki_core::validate_profile(&base)
+                .map_err(|e| format!("Anki base folder {}: {e}", base.display()))?;
+            profile_commands::run_profiles(
+                &base,
+                config_path(&args).as_deref(),
+                command,
+                args.json,
+            )?;
+        }
+        Some(CliCommand::Serve(command)) => {
+            with_collection(&profile_path(&args)?, &args, |actor| {
+                serve_commands::run(actor, command, args.json, &tanki_core::config::Config::load(&config_path(&args).ok_or("No config folder")?)?.connect)
+            })?;
+        }
         Some(CliCommand::Delete(command)) => {
             with_collection(&profile_path(&args)?, &args, |actor| {
                 note_commands::run_delete(actor, command, args.json)
             })?;
         }
+        Some(CliCommand::Completions { shell }) => {
+            use std::io::Write;
+            let mut script = Vec::new();
+            clap_complete::generate(*shell, &mut Args::command(), "tanki", &mut script);
+            // `tanki completions zsh | head` must not panic on a closed pipe.
+            match std::io::stdout().write_all(&script) {
+                Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {}
+                other => other?,
+            }
+        }
+        Some(CliCommand::ManPages { out_dir }) => write_man_pages(out_dir)?,
         Some(CliCommand::FixtureDump) => {
             // A development harness: never resolves a default (real) base.
             if args.base.is_none() {
@@ -407,35 +525,63 @@ fn run(args: Args) -> Result<()> {
                 return Err("--json is available for decks, not interactive study".into());
             }
             let keymap = load_keymap(args.keymap.as_deref())?;
-            let path = profile_path(&args)?;
-            with_collection(&path, &args, |actor| {
+            let mut path = profile_path(&args)?;
+            let mut first = true;
+            // The Tools screen's profile switch: close, then open the other one.
+            while let Some(name) = with_collection(&path, &args, |actor| {
+                if !first {
+                    return run_tui(actor, &args, keymap.clone(), Start::Decks);
+                }
                 if let Some(CliCommand::Review { deck: Some(name) }) = &args.command {
                     let tree = backend::deck_tree(actor)?;
                     let id = backend::find_deck(&tree, name)
                         .ok_or_else(|| format!("No deck named {name:?}"))?;
                     backend::select_deck(actor, id)?;
                 }
-                auto_sync(actor, &args, "open");
-                tanki_tui::terminal::run(
-                    actor,
-                    tanki_tui::terminal::Options {
-                        graphics: args.graphics.into(),
-                        start: if args.command.is_some() {
-                            Start::Review
-                        } else {
-                            Start::Decks
-                        },
-                        keymap,
-                        config: config_path(&args),
-                    },
-                )?;
-                auto_sync(actor, &args, "close");
-                Ok(())
-            })?;
+                let start = if args.command.is_some() {
+                    Start::Review
+                } else {
+                    Start::Decks
+                };
+                run_tui(actor, &args, keymap.clone(), start)
+            })? {
+                first = false;
+                if !valid_profile_name(&name) {
+                    return Err(format!("Invalid profile name {name:?}").into());
+                }
+                path = path
+                    .parent()
+                    .map(|base| base.join(&name))
+                    .ok_or("no base folder")?;
+            }
         }
     }
     Ok(())
 }
+/// The interactive app on an open collection, with auto-sync around it.
+/// `Some(name)` asks to reopen on another profile.
+fn run_tui(
+    actor: &CollectionActor,
+    args: &Args,
+    keymap: Keymap,
+    start: Start,
+) -> Result<Option<String>> {
+    auto_sync(actor, args, "open");
+    let switch = tanki_tui::terminal::run(
+        actor,
+        tanki_tui::terminal::Options {
+            graphics: args.graphics.into(),
+            start,
+            keymap,
+            config: config_path(args),
+            base: actor.profile_dir().parent().map(Path::to_path_buf),
+            playback: playback_options(args),
+        },
+    )?;
+    auto_sync(actor, args, "close");
+    Ok(switch)
+}
+
 /// PLAN 9 exit codes; see `docs/implementation/phase-2-interfaces.md`.
 fn exit_code(error: &(dyn std::error::Error + 'static)) -> u8 {
     if let Some(error) = error.downcast_ref::<package_commands::PackageError>() {
@@ -454,6 +600,29 @@ fn exit_code(error: &(dyn std::error::Error + 'static)) -> u8 {
         _ => 1,
     }
 }
+/// `tanki.1` plus `tanki-<sub>.1` for every visible subcommand (nested ones
+/// too, as `tanki-sync-login.1`), for packagers.
+fn write_man_pages(out_dir: &Path) -> Result<()> {
+    std::fs::create_dir_all(out_dir)?;
+    let mut command = Args::command();
+    command.build();
+    write_man_page(&command, "tanki", out_dir)
+}
+
+fn write_man_page(command: &clap::Command, name: &str, out_dir: &Path) -> Result<()> {
+    let command = command.clone().name(name.to_owned());
+    let mut page = Vec::new();
+    clap_mangen::Man::new(command.clone()).render(&mut page)?;
+    std::fs::write(out_dir.join(format!("{name}.1")), page)?;
+    for sub in command.get_subcommands().filter(|s| !s.is_hide_set()) {
+        if sub.get_name() == "help" {
+            continue;
+        }
+        write_man_page(sub, &format!("{name}-{}", sub.get_name()), out_dir)?;
+    }
+    Ok(())
+}
+
 fn main() -> std::process::ExitCode {
     match run(Args::parse()) {
         Ok(()) => std::process::ExitCode::SUCCESS,
@@ -467,6 +636,32 @@ fn main() -> std::process::ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rich_media_flags_select_only_explicit_local_backends() {
+        let args = Args::try_parse_from([
+            "tanki",
+            "--tts",
+            "piper",
+            "--piper-model",
+            "/tmp/voice.onnx",
+            "--video-output",
+            "sixel",
+            "--generate-latex",
+            "review",
+        ])
+        .unwrap();
+        let options = playback_options(&args);
+        assert_eq!(options.tts.backend, tanki_media::TtsBackend::Piper);
+        assert_eq!(
+            options.tts.piper_model,
+            Some(PathBuf::from("/tmp/voice.onnx"))
+        );
+        assert_eq!(options.video, tanki_media::VideoOutput::Sixel);
+        assert!(args.generate_latex);
+        let defaults = playback_options(&Args::try_parse_from(["tanki"]).unwrap());
+        assert_eq!(defaults.tts.backend, tanki_media::TtsBackend::Auto);
+        assert_eq!(defaults.video, tanki_media::VideoOutput::Window);
+    }
     #[test]
     fn keymap_overrides_and_unbinds_are_reflected_in_hints() {
         let dir = tempfile::tempdir().unwrap();

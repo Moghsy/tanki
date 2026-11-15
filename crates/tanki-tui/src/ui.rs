@@ -1,5 +1,8 @@
 //! Drawing: every screen, overlay and the status line, into a ratatui frame.
-use crate::app::{graphics_name, App, ChoiceValue, Layer, Overlay, PromptKind, Screen};
+use crate::app::{
+    graphics_name, App, ChoiceValue, DeckToolsLayer, Layer, Overlay, PromptKind, Screen,
+    TransferLayer,
+};
 use crate::backend::DeckRow;
 use crate::keymap::{Action, Scope};
 use crate::reviewer::{next_learn_message, Phase};
@@ -78,15 +81,22 @@ impl App<'_> {
         let main = Rect::new(area.x, area.y, area.width, area.height - 1);
         let status = Rect::new(area.x, area.bottom() - 1, area.width, 1);
         let zoom = matches!(self.overlay, Some(Overlay::Zoom { .. }));
-        if !self.layers.is_empty() {
-            self.draw_layer(frame, main);
-        } else if !zoom {
+        // A dialog layer (deck tools) is drawn over what is below it; the
+        // reviewer is not, so its images cannot cover the dialog.
+        let dialog_on_top = self.layers.last().is_some_and(Layer::is_dialog);
+        let below = self.layers.len() - usize::from(dialog_on_top);
+        if below > 0 {
+            self.draw_layer(frame, main, below - 1);
+        } else if !zoom && !(dialog_on_top && self.screen.scope() == Scope::Review) {
             match self.screen.scope() {
                 Scope::Decks => self.draw_decks(frame, main),
                 Scope::Overview => self.draw_overview(frame, main),
                 Scope::Review => self.draw_review(frame, main),
                 _ => self.draw_congrats(frame, main),
             }
+        }
+        if dialog_on_top {
+            self.draw_dialog(frame, main);
         }
         self.draw_overlay(frame, main);
         if self.sync_ui.is_visible() {
@@ -103,11 +113,30 @@ impl App<'_> {
 
     // ---- add / browser layers ----------------------------------------------
 
-    fn draw_layer(&mut self, frame: &mut Frame, area: Rect) {
+    fn draw_dialog(&mut self, frame: &mut Frame, area: Rect) {
+        let Some(Layer::DeckTools(dialog)) = self.layers.last() else {
+            return;
+        };
+        let buf = frame.buffer_mut();
+        match &**dialog {
+            DeckToolsLayer::Filtered(ui) => ui.render(area, buf),
+            DeckToolsLayer::CustomStudy(ui) => ui.render(area, buf),
+            DeckToolsLayer::Prompt(ui) => ui.render(area, buf),
+            DeckToolsLayer::Description(ui) => ui.render(
+                area,
+                buf,
+                &*self.services.renderer,
+                &self.services.display,
+                &self.profile.media_dir,
+            ),
+        }
+    }
+
+    fn draw_layer(&mut self, frame: &mut Frame, area: Rect, index: usize) {
         let renderer = &*self.services.renderer;
         let backend = &self.backend;
         let buf = frame.buffer_mut();
-        match self.layers.last_mut() {
+        match self.layers.get_mut(index) {
             Some(Layer::Add(ui)) => {
                 // The form, and its context keys on the last row.
                 let form = Rect {
@@ -122,7 +151,55 @@ impl App<'_> {
                 ui.prepare(backend, area);
                 ui.render(area, buf, renderer);
             }
-            None => {}
+            Some(Layer::DeckOptions(ui)) => {
+                let (form, hints) = split_hints(area);
+                ui.render(form, buf);
+                Line::from(Span::styled(hint_text(&ui.hints()), dim())).render_into(buf, hints);
+            }
+            Some(Layer::Notetypes(ui)) => {
+                let (form, hints) = split_hints(area);
+                ui.render(form, buf, renderer);
+                Line::from(Span::styled(ui.hints(), dim())).render_into(buf, hints);
+            }
+            Some(Layer::ChangeNotetype(ui)) => {
+                let (form, hints) = split_hints(area);
+                ui.render(form, buf);
+                Line::from(Span::styled(ui.hints(), dim())).render_into(buf, hints);
+            }
+            Some(Layer::Stats(ui)) => {
+                let (body, hints) = split_hints(area);
+                ui.render(body, buf);
+                Line::from(Span::styled(hint_text(&ui.hints()), dim())).render_into(buf, hints);
+            }
+            Some(Layer::CardInfo(ui)) => {
+                let (body, hints) = split_hints(area);
+                ui.render(body, buf);
+                Line::from(Span::styled(hint_text(&ui.hints()), dim())).render_into(buf, hints);
+            }
+            Some(Layer::Tools(ui)) => {
+                let (body, hints) = split_hints(area);
+                ui.render(body, buf);
+                Line::from(Span::styled(hint_text(&ui.hints()), dim())).render_into(buf, hints);
+            }
+            Some(Layer::Transfer(layer)) => {
+                let (body, hints) = split_hints(area);
+                let keys = match &**layer {
+                    TransferLayer::Import(ui) => {
+                        ui.render(body, buf);
+                        ui.hints()
+                    }
+                    TransferLayer::Export(ui) => {
+                        ui.render(body, buf);
+                        ui.hints()
+                    }
+                    TransferLayer::Duplicates(ui) => {
+                        ui.render(body, buf);
+                        ui.hints()
+                    }
+                };
+                Line::from(Span::styled(hint_text(&keys), dim())).render_into(buf, hints);
+            }
+            Some(Layer::DeckTools(_)) | None => {}
         }
     }
 
@@ -445,26 +522,35 @@ impl App<'_> {
         let scroll = view.scroll;
         let buf = frame.buffer_mut();
         self.services.renderer.paint(card, scroll, card_area, buf);
-        // Images fully inside the viewport.
+        // Slice images against the viewport, preserving full-card scale.
         for block in &card.images {
             if !show_images {
                 continue;
             }
-            if block.row < scroll {
-                continue;
-            }
-            let top = block.row - scroll;
-            if top + block.height as usize > card_area.height as usize {
+            let top = block.row.saturating_sub(scroll);
+            let skip = scroll.saturating_sub(block.row).min(block.height as usize) as u16;
+            let visible = block.height.saturating_sub(skip).min(
+                card_area
+                    .height
+                    .saturating_sub(top.min(u16::MAX as usize) as u16),
+            );
+            if visible == 0 || top >= card_area.height as usize {
                 continue;
             }
             let rect = Rect::new(
                 card_area.x + block.col,
                 card_area.y + top as u16,
                 block.width.min(card_area.width.saturating_sub(block.col)),
-                block.height,
+                visible,
             );
             self.services.renderer.obscure_links(rect);
-            match self.services.images.draw(&block.source, rect, buf) {
+            match self.services.images.draw_slice(
+                &block.source,
+                (block.width, block.height),
+                skip,
+                rect,
+                buf,
+            ) {
                 ImageState::Drawn => {}
                 ImageState::Loading => {
                     buf.set_stringn(
@@ -1039,7 +1125,9 @@ impl App<'_> {
             AudioStatus::NoDevice(_) => "♪ no device".to_owned(),
             AudioStatus::Off => "♪ off".to_owned(),
         };
-        let audio = if self.services.audio.is_playing() {
+        let audio = if self.services.audio.is_recording() {
+            "● recording".to_owned()
+        } else if self.services.audio.is_playing() {
             format!("{audio} ▶")
         } else {
             audio
@@ -1063,6 +1151,13 @@ impl App<'_> {
             let x = area.x + left_w + 1;
             let max = rx.saturating_sub(x + 1) as usize;
             buf.set_stringn(x, area.y, &message.text, max, style);
+        } else if let Screen::Review(view) = &self.screen {
+            if let Some(render) = &view.render {
+                let notices = render.card.notices.join(" · ");
+                let x = area.x + left_w + 1;
+                let max = rx.saturating_sub(x + 1) as usize;
+                buf.set_stringn(x, area.y, notices, max, base.fg(Color::Yellow));
+            }
         }
     }
 }
@@ -1129,4 +1224,23 @@ impl RenderInto for Line<'_> {
         use ratatui::widgets::Widget;
         self.render(area.intersection(buf.area), buf);
     }
+}
+
+/// A layer's body and its one-row key hints below it.
+fn split_hints(area: Rect) -> (Rect, Rect) {
+    let body = Rect {
+        height: area.height.saturating_sub(1),
+        ..area
+    };
+    let hints = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
+    (body, hints)
+}
+
+/// `key description` pairs as one hint line.
+fn hint_text(hints: &[(&str, &str)]) -> String {
+    hints
+        .iter()
+        .map(|(k, d)| format!("{k} {d}"))
+        .collect::<Vec<_>>()
+        .join("  ")
 }

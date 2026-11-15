@@ -1,0 +1,84 @@
+name: Release
+# Linux release binaries for a pushed `v*` tag (PLAN 11, Phase 6 packaging).
+# Built on Ubuntu 22.04 against glibc 2.35, not musl: a fully static binary
+# cannot load PipeWire/PulseAudio's ALSA plugins (R8).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            protoc_arch: x86_64
+            protoc_sha256: 96553041f1a91ea0efee963cb16f462f5985b4d65365f3907414c360044d8065
+          - runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            protoc_arch: aarch_64
+            protoc_sha256: 6c554de11cea04c56ebf8e45b54434019b1cd85223d4bbd25c282425e306ecc2
+    runs-on: ${{ matrix.runner }}
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libasound2-dev unzip
+      # 22.04's protobuf-compiler (3.12) predates proto3 `optional`, which
+      # Anki's protos use; fetch the pinned release and check its hash.
+      - name: Install protoc 31.1
+        run: |
+          zip=protoc-31.1-linux-${{ matrix.protoc_arch }}.zip
+          curl -fsSLO "https://github.com/protocolbuffers/protobuf/releases/download/v31.1/$zip"
+          echo "${{ matrix.protoc_sha256 }}  $zip" | sha256sum -c -
+          unzip -q "$zip" -d "$RUNNER_TEMP/protoc"
+          echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal
+      - name: Initialize Anki and apply patches
+        run: |
+          git submodule update --init -- vendor/anki
+          cargo xtask setup
+      - name: Build
+        run: python3 scripts/cargo-bounded.py build --release --locked -p tanki-cli
+      - name: Package
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          name="tanki-$version-${{ matrix.target }}"
+          mkdir -p "dist/$name/completions" "dist/$name/man/man1"
+          bin=target/release/tanki
+          cp "$bin" LICENSE README.md "dist/$name/"
+          cp docs/install.md "dist/$name/INSTALL.md"
+          "$bin" man-pages "dist/$name/man/man1"
+          "$bin" completions bash > "dist/$name/completions/tanki.bash"
+          "$bin" completions zsh > "dist/$name/completions/_tanki"
+          "$bin" completions fish > "dist/$name/completions/tanki.fish"
+          "$bin" --version
+          ldd "$bin"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*.tar.gz*
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --generate-notes dist/*

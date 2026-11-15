@@ -40,6 +40,25 @@ impl PendingOperation {
         data_response(self.reply.recv().map_err(|_| CoreError::ActorStopped)??)
     }
 }
+/// A queued command of any kind (`CollectionActor::start`).
+pub struct PendingCommand {
+    reply: mpsc::Receiver<Result<Response>>,
+}
+impl PendingCommand {
+    /// `Ok(None)` while the actor is still working; poll
+    /// `CollectionActor::progress` meanwhile.
+    pub fn try_recv(&self) -> Result<Option<Response>> {
+        match self.reply.try_recv() {
+            Ok(result) => Ok(Some(result?)),
+            Err(mpsc::TryRecvError::Empty) => Ok(None),
+            Err(mpsc::TryRecvError::Disconnected) => Err(CoreError::ActorStopped),
+        }
+    }
+    /// Blocks until the command finishes.
+    pub fn wait(self) -> Result<Response> {
+        self.reply.recv().map_err(|_| CoreError::ActorStopped)?
+    }
+}
 fn data_response(response: Response) -> Result<DataResponse> {
     match response {
         Response::Data(data) => Ok(data),
@@ -96,12 +115,30 @@ impl CollectionActor {
                     }
                 };
                 let mut queued = HashMap::new();
+                let mut last_backup = std::time::Instant::now();
                 loop {
+                    if crate::latex::collect(&mut col) {
+                        let changes = OpChanges {
+                            note_text: true,
+                            ..Default::default()
+                        };
+                        subs.lock()
+                            .unwrap()
+                            .retain(|sub| sub.send(changes.clone()).is_ok());
+                    }
+                    let wait = if crate::latex::pending() {
+                        std::time::Duration::from_millis(40)
+                    } else {
+                        PERIODIC_BACKUP.saturating_sub(last_backup.elapsed())
+                    };
                     // Desktop checks for a due backup every 5 minutes; so does
                     // the actor while idle. Unforced: Anki's interval applies.
-                    let (command, reply) = match receiver.recv_timeout(PERIODIC_BACKUP) {
+                    let (command, reply) = match receiver.recv_timeout(wait) {
                         Ok(request) => request,
                         Err(mpsc::RecvTimeoutError::Timeout) => {
+                            if last_backup.elapsed() < PERIODIC_BACKUP {
+                                continue;
+                            }
                             col = match backup_and_relock_with(col, &profile, &shared, false) {
                                 Ok((reopened, saved)) => {
                                     if let Err(error) = saved {
@@ -111,12 +148,14 @@ impl CollectionActor {
                                 }
                                 Err(error) => return Err(error),
                             };
+                            last_backup = std::time::Instant::now();
                             continue;
                         }
                         Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     };
                     let command = match command {
                         Command::Data(data) if owns_collection(&data) => {
+                            crate::latex::shutdown();
                             shared.lock().unwrap().reset();
                             queued.clear();
                             let (reopened, result) = owned_data(col, &profile, &shared, data);
@@ -152,10 +191,36 @@ impl CollectionActor {
                         }
                         continue;
                     }
-                    if matches!(command, Command::Data(_)) {
+                    let maintenance = match &command {
+                        Command::Manage(crate::manage::ManageCommand::Maintenance(m)) => {
+                            Some(m.backs_up())
+                        }
+                        _ => None,
+                    };
+                    if matches!(command, Command::Data(_)) || maintenance.is_some() {
                         shared.lock().unwrap().reset();
                     }
-                    let result = execute(&mut col, command, &mut queued);
+                    let mut result = execute(&mut col, command, &mut queued);
+                    // A refused (unconfirmed) check made no backup.
+                    let backed_up = !matches!(result, Err(CoreError::SchemaChangeRequired));
+                    if maintenance == Some(true) && backed_up {
+                        // Check Database / Check Media backed up inside the
+                        // command, which drops SQLite's lock (see
+                        // `backup_and_relock`): reopen to take it back.
+                        queued.clear();
+                        let reopened = col
+                            .close(None)
+                            .map_err(CoreError::from)
+                            .and_then(|()| open_collection(&profile, &shared));
+                        match reopened {
+                            Ok(reopened) => col = reopened,
+                            Err(error) => {
+                                result = result.and(Err(error.clone()));
+                                let _ = reply.send(result);
+                                return Err(error);
+                            }
+                        }
+                    }
                     if let Some(changes) = result.as_ref().ok().and_then(Response::changes) {
                         subs.lock()
                             .unwrap()
@@ -164,6 +229,7 @@ impl CollectionActor {
                     }
                     let _ = reply.send(result);
                 }
+                crate::latex::shutdown();
                 // The exit backup follows Anki's schedule, as desktop's close
                 // does, and is joined before close, so no backup thread
                 // outlives the actor. No relock is needed: the collection closes next.
@@ -204,6 +270,18 @@ impl CollectionActor {
             .send((Command::Data(command), tx))
             .map_err(|_| CoreError::ActorStopped)?;
         Ok(PendingOperation { reply: rx })
+    }
+    /// Queues any command without waiting for it: long Phase 5 operations
+    /// (FSRS, check database/media, CSV import). Poll `progress()`;
+    /// `cancel_operation()` asks it to stop.
+    pub fn start(&self, command: Command) -> Result<PendingCommand> {
+        let (tx, rx) = mpsc::channel();
+        self.sender
+            .as_ref()
+            .ok_or(CoreError::ActorStopped)?
+            .send((command, tx))
+            .map_err(|_| CoreError::ActorStopped)?;
+        Ok(PendingCommand { reply: rx })
     }
     /// Latest progress of the running data operation. Does not go through the
     /// actor's queue, so it answers while the actor is busy.
@@ -599,12 +677,26 @@ fn execute(
     queued: &mut study::StateCache,
 ) -> Result<Response> {
     Ok(match command {
+        Command::SetLatexGeneration { enabled } => {
+            if !enabled {
+                crate::latex::shutdown();
+            }
+            Response::Changes(changes(anki::services::ConfigService::set_config_bool(
+                col,
+                pb::config::SetConfigBoolRequest {
+                    key: pb::config::config_key::Bool::RenderLatex as i32,
+                    value: enabled,
+                    undoable: false,
+                },
+            )?))
+        }
         Command::Data(command) => Response::Data(data(col, command)?),
         Command::Notes(NoteCommand::UpdateNotes { updates }) => Response::Edit(
             EditResponse::Updated(writeback::update_notes(col, updates)?),
         ),
         Command::Notes(command) => Response::Edit(notes_ops::execute(col, command)?),
         Command::Browse(command) => Response::Edit(browse_ops::execute(col, command)?),
+        Command::Manage(command) => Response::Manage(crate::manage::execute(col, command)?),
         Command::DeckTree => Response::DeckTree(deck(study::deck_tree(col)?)),
         Command::Queue { limit } => Response::Queue(study::queue(col, limit, queued)?),
         Command::Answer {
@@ -789,8 +881,8 @@ fn audio(tags: Vec<pb::card_rendering::AvTag>) -> Vec<AudioTag> {
 ///    `[latex]`, `[$]` and `[$$]` become `<img class=latex>` tags. If an image
 ///    is missing from the media folder and LaTeX generation is off (the
 ///    default), the localized "disabled" message is appended once per side.
-///    tanki does not run LaTeX yet, so with generation on, a missing image is
-///    left missing (pylib would generate it).
+///    With generation enabled, external LaTeX tools generate missing images
+///    in an isolated temporary directory; Anki registers the resulting media.
 fn render(col: &mut Collection, card_id: i64) -> Result<RenderedCard> {
     use anki::services::CardsService;
     let card = CardsService::get_card(col, pb::cards::CardId { cid: card_id })?;
@@ -803,7 +895,8 @@ fn render(col: &mut Collection, card_id: i64) -> Result<RenderedCard> {
         },
     );
     let template_error = matches!(rendered, Err(anki::error::AnkiError::TemplateError { .. }));
-    let mut out = finish_render(col, rendered, card.template_idx)?;
+    let note = NotesService::get_note(col, pb::notes::NoteId { nid: card.note_id })?;
+    let mut out = finish_render(col, rendered, card.template_idx, note.notetype_id)?;
     if !template_error {
         out.type_answer = study::type_answer(col, &card, &out.question)?;
     }
@@ -817,6 +910,7 @@ pub(crate) fn finish_render(
     col: &mut Collection,
     rendered: std::result::Result<pb::card_rendering::RenderCardResponse, anki::error::AnkiError>,
     ord: u32,
+    notetype_id: i64,
 ) -> Result<RenderedCard> {
     use anki::services::{ConfigService, MediaService};
     let r = match rendered {
@@ -824,6 +918,7 @@ pub(crate) fn finish_render(
         Err(e @ anki::error::AnkiError::TemplateError { .. }) => {
             let text = e.message(col.tr());
             return Ok(RenderedCard {
+                notetype_id,
                 question: text.clone(),
                 answer: text,
                 css: String::new(),
@@ -831,6 +926,7 @@ pub(crate) fn finish_render(
                 answer_audio: vec![],
                 ord,
                 type_answer: None,
+                ..Default::default()
             });
         }
         Err(e) => return Err(e.into()),
@@ -857,6 +953,25 @@ pub(crate) fn finish_render(
     )?
     .val;
     let latex_svg = r.latex_svg;
+    let notetype = anki::services::NotetypesService::get_notetype(
+        col,
+        pb::notetypes::NotetypeId { ntid: notetype_id },
+    )?;
+    let template_question = notetype
+        .templates
+        .iter()
+        .filter_map(|t| t.config.as_ref())
+        .map(|c| c.q_format.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let template_answer = notetype
+        .templates
+        .iter()
+        .filter_map(|t| t.config.as_ref())
+        .map(|c| c.a_format.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let latex_config = notetype.config;
     let mut latex = |html: String| -> Result<String> {
         let out = CardRenderingService::extract_latex(
             col,
@@ -868,10 +983,34 @@ pub(crate) fn finish_render(
         )?;
         let mut html = out.text;
         for image in out.latex {
-            let path = MediaService::get_absolute_media_path(col, image.filename.into())?.val;
-            if !Path::new(&path).exists() && !generate_latex {
+            let path =
+                MediaService::get_absolute_media_path(col, image.filename.clone().into())?.val;
+            if Path::new(&path).exists() {
+                continue;
+            }
+            if !generate_latex {
                 html.push_str(&col.tr().preferences_latex_generation_disabled());
                 break;
+            }
+            let Some(config) = &latex_config else {
+                continue;
+            };
+            match crate::latex::request(
+                &image.filename,
+                &image.latex_body,
+                &config.latex_pre,
+                &config.latex_post,
+                latex_svg,
+            ) {
+                Ok(Some(actual)) if actual != image.filename => {
+                    html = html.replace(
+                        &image.filename,
+                        &actual.replace('&', "&amp;").replace('"', "&quot;"),
+                    );
+                }
+                Ok(Some(_)) => {}
+                Ok(None) => html.push_str("<div class=latex-pending>Generating LaTeX image…</div>"),
+                Err(error) => html.push_str(&crate::latex::error_html(&error)),
             }
         }
         Ok(html)
@@ -879,6 +1018,9 @@ pub(crate) fn finish_render(
     let question = latex(q.text)?;
     let answer = latex(a.text)?;
     Ok(RenderedCard {
+        notetype_id,
+        template_question,
+        template_answer,
         question,
         answer,
         css: r.css,

@@ -260,6 +260,7 @@ fn render_preview(col: &mut Collection, note: NoteData, card_ord: u32) -> Result
             ntid: note.notetype_id,
         },
     )?;
+    let notetype_id = note.notetype_id;
     let cloze = nt.config.as_ref().map(|c| c.kind) == Some(Kind::Cloze as i32);
     let template_ord = if cloze { 0 } else { card_ord as usize };
     let template = nt
@@ -277,7 +278,7 @@ fn render_preview(col: &mut Collection, note: NoteData, card_ord: u32) -> Result
             partial_render: true,
         },
     );
-    finish_render(col, rendered, card_ord)
+    finish_render(col, rendered, card_ord, notetype_id)
 }
 
 /// Changes the field's sticky flag in place. The note type's fields and

@@ -20,11 +20,13 @@ jobs:
           cargo xtask setup
           git -C vendor/anki apply --reverse --check ../../patches/anki/0001-expose-progress.patch
       - name: Build
-        run: cargo build --workspace --locked
+        run: python3 scripts/cargo-bounded.py build --workspace --all-features --locked
       - name: Test
-        run: cargo test --workspace --locked
+        run: python3 scripts/cargo-bounded.py test --workspace --all-features --locked
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        run: python3 scripts/cargo-bounded.py clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Build cache guard tests
+        run: python3 scripts/test-cargo-bounded.py
       - name: License metadata gate
         run: |
           python3 scripts/test-license-check.py

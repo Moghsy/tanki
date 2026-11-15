@@ -10,9 +10,14 @@ use clap::{Args, Subcommand, ValueEnum};
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use tanki_core::transfer::{
+    CsvDeck, CsvDelimiter, CsvMetadataInfo, CsvMetadataRequest, CsvNotetype, CsvSettings,
+    DupeResolution, MatchScope, TextExportSelection, TransferCommand, TransferResponse,
+};
 use tanki_core::{
     BackupInfo, CollectionActor, Command, CoreError, DataCommand, DataResponse, ExportOptions,
-    ExportSelection, ImportLog, ImportOptions, PackageCommand, Response, UpdateCondition,
+    ExportSelection, ImportLog, ImportOptions, ManageCommand, ManageResponse, NoteCommand,
+    PackageCommand, Response, UpdateCondition,
 };
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -78,12 +83,87 @@ impl From<UpdateArg> for UpdateCondition {
     }
 }
 
-/// `tanki import <file.apkg> [options]`
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum DelimiterArg {
+    Tab,
+    Pipe,
+    Semicolon,
+    Colon,
+    Comma,
+    Space,
+}
+impl From<DelimiterArg> for CsvDelimiter {
+    fn from(value: DelimiterArg) -> Self {
+        match value {
+            DelimiterArg::Tab => Self::Tab,
+            DelimiterArg::Pipe => Self::Pipe,
+            DelimiterArg::Semicolon => Self::Semicolon,
+            DelimiterArg::Colon => Self::Colon,
+            DelimiterArg::Comma => Self::Comma,
+            DelimiterArg::Space => Self::Space,
+        }
+    }
+}
+
+/// What to do with a text row that matches an existing note.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum DupesArg {
+    /// Update the existing note.
+    Update,
+    /// Keep the existing note, skip the row.
+    Keep,
+    /// Import the row as a new note anyway.
+    Add,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum MatchScopeArg {
+    Notetype,
+    Deck,
+}
+
+/// `tanki import <file> [options]`: an .apkg deck package, a text file
+/// (.csv, .tsv, .txt) or a ForeignData .json file.
 #[derive(Args, Debug, Clone)]
 pub struct ImportArgs {
-    /// The .apkg deck package to import. Collection packages (.colpkg) are
-    /// restored with `tanki backup restore` instead.
+    /// The file to import: .apkg, .csv/.tsv/.txt or .json. Collection
+    /// packages (.colpkg) are restored with `tanki backup restore` instead.
     pub file: PathBuf,
+    /// Text files: print the detected settings and the first rows, import
+    /// nothing.
+    #[arg(long)]
+    pub preview: bool,
+    /// Text files: the note type to import into (overrides the file's header).
+    #[arg(long, value_name = "NAME")]
+    pub notetype: Option<String>,
+    /// Text files: the deck to import into; created if missing.
+    #[arg(long, value_name = "NAME")]
+    pub deck: Option<String>,
+    /// Text files: field to column mapping, e.g. `Front=1,Back=2` (columns
+    /// count from 1; unlisted fields stay empty).
+    #[arg(long, value_name = "FIELD=COL,...", value_delimiter = ',')]
+    pub map: Vec<String>,
+    /// Text files: the column holding space-separated tags.
+    #[arg(long, value_name = "COL")]
+    pub tags_column: Option<u32>,
+    /// Text files: the column holding each note's GUID.
+    #[arg(long, value_name = "COL")]
+    pub guid_column: Option<u32>,
+    /// Text files: tags added to every imported note.
+    #[arg(long, value_name = "TAGS")]
+    pub global_tags: Option<String>,
+    /// Text and JSON files: what to do with rows that match existing notes.
+    #[arg(long, value_enum)]
+    pub dupes: Option<DupesArg>,
+    /// Text files: match existing notes within the note type or the deck too.
+    #[arg(long, value_enum)]
+    pub match_scope: Option<MatchScopeArg>,
+    /// Text files: the field delimiter (detected otherwise).
+    #[arg(long, value_enum)]
+    pub delimiter: Option<DelimiterArg>,
+    /// Text files: whether the fields contain HTML (detected otherwise).
+    #[arg(long)]
+    pub html: Option<bool>,
     /// Merge incoming note types into existing ones. May require a full sync.
     #[arg(long)]
     pub merge_notetypes: bool,
@@ -128,8 +208,27 @@ impl ImportArgs {
 /// `tanki export <file> [--deck D | --query Q] [options]`
 #[derive(Args, Debug, Clone)]
 pub struct ExportArgs {
-    /// Output file: .apkg for decks, .colpkg for the whole collection.
+    /// Output file: .apkg for decks, .colpkg for the whole collection, or
+    /// .txt/.tsv/.csv for notes (or cards, with --cards) as text.
     pub file: PathBuf,
+    /// Text export: write cards (rendered question and answer) instead of notes.
+    #[arg(long)]
+    pub cards: bool,
+    /// Text export: keep HTML in the fields.
+    #[arg(long)]
+    pub with_html: bool,
+    /// Text export of notes: add a tags column.
+    #[arg(long)]
+    pub with_tags: bool,
+    /// Text export of notes: add a deck column.
+    #[arg(long)]
+    pub with_deck_column: bool,
+    /// Text export of notes: add a note type column.
+    #[arg(long)]
+    pub with_notetype: bool,
+    /// Text export of notes: add a GUID column (lets a re-import match).
+    #[arg(long)]
+    pub with_guid: bool,
     /// Export this deck (full name, e.g. "Spanish::Verbs") and its subdecks.
     #[arg(long, conflicts_with = "query")]
     pub deck: Option<String>,
@@ -219,6 +318,15 @@ fn import(actor: &CollectionActor, args: &ImportArgs, json: bool) -> Result<Stri
         ))
         .into());
     }
+    if has_extension(&args.file, "json") {
+        return import_json(actor, args, json);
+    }
+    if ["csv", "tsv", "txt", "text"]
+        .iter()
+        .any(|e| has_extension(&args.file, e))
+    {
+        return import_text_file(actor, args, json);
+    }
     let response = run_data(
         actor,
         DataCommand::Package(PackageCommand::Import {
@@ -276,6 +384,12 @@ fn import_text(file: &Path, log: &ImportLog, show: usize) -> String {
 }
 
 fn export(actor: &CollectionActor, args: &ExportArgs, json: bool) -> Result<String> {
+    if ["txt", "tsv", "csv", "text"]
+        .iter()
+        .any(|e| has_extension(&args.file, e))
+    {
+        return export_text(actor, args, json);
+    }
     let collection = args.colpkg || has_extension(&args.file, "colpkg");
     if collection
         && (args.deck.is_some()
@@ -345,6 +459,290 @@ fn export(actor: &CollectionActor, args: &ExportArgs, json: bool) -> Result<Stri
         serde_json::json!({ "file": args.file, "notes": notes }).to_string()
     } else {
         format!("Exported {notes} notes to {}", args.file.display())
+    })
+}
+
+/// Runs a Phase 5 transfer command as a long operation with progress.
+fn run_transfer(actor: &CollectionActor, command: TransferCommand) -> Result<TransferResponse> {
+    let operation = actor
+        .start(Command::Manage(ManageCommand::Transfer(command)))
+        .map_err(core_error)?;
+    let live = std::io::stderr().is_terminal();
+    let mut shown = String::new();
+    let result = loop {
+        match operation.try_recv() {
+            Ok(Some(Response::Manage(ManageResponse::Transfer(response)))) => break Ok(response),
+            Ok(Some(_)) => break Err(unexpected()),
+            Err(error) => break Err(core_error(error).into()),
+            Ok(None) => {}
+        }
+        if live {
+            let line = progress_line(&actor.progress());
+            if line != shown {
+                eprint!("\r\x1b[K{line}");
+                shown = line;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    if live && !shown.is_empty() {
+        eprint!("\r\x1b[K");
+    }
+    result
+}
+
+fn imported_report(
+    args: &ImportArgs,
+    log: &ImportLog,
+    changes: &tanki_core::OpChanges,
+    json: bool,
+) -> Result<String> {
+    Ok(if json {
+        serde_json::to_string_pretty(&serde_json::json!({
+            "file": args.file,
+            "log": log,
+            "changes": changes,
+        }))?
+    } else {
+        import_text(&args.file, log, args.show)
+    })
+}
+
+fn import_json(actor: &CollectionActor, args: &ImportArgs, json: bool) -> Result<String> {
+    let response = run_transfer(
+        actor,
+        TransferCommand::ImportJson {
+            path: absolute(&args.file)?,
+            schema_confirmed: args.confirm_full_sync,
+        },
+    )?;
+    let TransferResponse::Imported { log, changes } = response else {
+        return Err(unexpected());
+    };
+    imported_report(args, &log, &changes, json)
+}
+
+fn import_text_file(actor: &CollectionActor, args: &ImportArgs, json: bool) -> Result<String> {
+    let path = absolute(&args.file)?;
+    let notetype_id = match &args.notetype {
+        Some(name) => Some(notetype_by_name(actor, name)?.0),
+        None => None,
+    };
+    let request = CsvMetadataRequest {
+        path: path.clone(),
+        delimiter: args.delimiter.map(Into::into),
+        notetype_id,
+        deck_id: None,
+        is_html: args.html,
+    };
+    let TransferResponse::CsvMetadata(info) =
+        run_transfer(actor, TransferCommand::CsvMetadata(request))?
+    else {
+        return Err(unexpected());
+    };
+    let settings = apply_text_overrides(args, &info)?;
+    if args.preview {
+        return Ok(if json {
+            serde_json::to_string_pretty(&serde_json::json!({
+                "settings": settings,
+                "preview": info.preview,
+                "notetype": info.notetype_name,
+                "fields": info.field_names,
+            }))?
+        } else {
+            preview_text(&settings, &info)
+        });
+    }
+    let response = run_transfer(actor, TransferCommand::ImportCsv { path, settings })?;
+    let TransferResponse::Imported { log, changes } = response else {
+        return Err(unexpected());
+    };
+    imported_report(args, &log, &changes, json)
+}
+
+/// The detected settings with the command line's choices applied.
+fn apply_text_overrides(args: &ImportArgs, info: &CsvMetadataInfo) -> Result<CsvSettings> {
+    let mut settings = info.settings.clone();
+    if let Some(delimiter) = args.delimiter {
+        settings.delimiter = delimiter.into();
+    }
+    if let Some(html) = args.html {
+        settings.is_html = html;
+    }
+    if let Some(deck) = &args.deck {
+        settings.deck = Some(CsvDeck::Name(deck.clone()));
+    }
+    if let Some(column) = args.tags_column {
+        settings.tags_column = column;
+    }
+    if let Some(column) = args.guid_column {
+        settings.guid_column = column;
+    }
+    if let Some(tags) = &args.global_tags {
+        settings.global_tags = tags.split_whitespace().map(str::to_owned).collect();
+    }
+    if let Some(dupes) = args.dupes {
+        settings.dupe_resolution = match dupes {
+            DupesArg::Update => DupeResolution::Update,
+            DupesArg::Keep => DupeResolution::Preserve,
+            DupesArg::Add => DupeResolution::Duplicate,
+        };
+    }
+    if let Some(scope) = args.match_scope {
+        settings.match_scope = match scope {
+            MatchScopeArg::Notetype => MatchScope::Notetype,
+            MatchScopeArg::Deck => MatchScope::NotetypeAndDeck,
+        };
+    }
+    if !args.map.is_empty() {
+        let Some(CsvNotetype::Global { id, .. }) = &settings.notetype else {
+            return Err(PackageError::new(
+                "--map needs one note type for the whole file: give --notetype or a #notetype: header",
+            )
+            .into());
+        };
+        let columns = info.settings.columns();
+        let mut field_columns = vec![0; info.field_names.len()];
+        for entry in &args.map {
+            let (name, column) = entry.split_once('=').ok_or_else(|| {
+                PackageError::new(format!("--map expects FIELD=COLUMN, got {entry:?}"))
+            })?;
+            let at = info
+                .field_names
+                .iter()
+                .position(|f| f.eq_ignore_ascii_case(name.trim()))
+                .ok_or_else(|| {
+                    PackageError::new(format!(
+                        "The note type has no field {name:?} (fields: {})",
+                        info.field_names.join(", ")
+                    ))
+                })?;
+            let column: u32 = column.trim().parse().map_err(|_| {
+                PackageError::new(format!("{column:?} is not a column number (from 1)"))
+            })?;
+            if column as usize > columns {
+                return Err(PackageError::new(format!(
+                    "Column {column} does not exist: the file has {columns}"
+                ))
+                .into());
+            }
+            field_columns[at] = column;
+        }
+        settings.notetype = Some(CsvNotetype::Global {
+            id: *id,
+            field_columns,
+        });
+    }
+    Ok(settings)
+}
+
+fn preview_text(settings: &CsvSettings, info: &CsvMetadataInfo) -> String {
+    let mut out = format!(
+        "Delimiter: {}\nHTML: {}\nColumns: {}",
+        settings.delimiter.name(),
+        settings.is_html,
+        settings.columns()
+    );
+    match (&settings.notetype, &info.notetype_name) {
+        (Some(CsvNotetype::Global { field_columns, .. }), Some(name)) => {
+            out.push_str(&format!("\nNote type: {name}"));
+            for (field, column) in info.field_names.iter().zip(field_columns) {
+                match column {
+                    0 => out.push_str(&format!("\n  {field}: (none)")),
+                    column => out.push_str(&format!("\n  {field}: column {column}")),
+                }
+            }
+        }
+        (Some(CsvNotetype::Column(c)), _) => {
+            out.push_str(&format!("\nNote type: named in column {c}"))
+        }
+        _ => out.push_str("\nNote type: none chosen (use --notetype)"),
+    }
+    match &settings.deck {
+        Some(CsvDeck::Name(n)) => out.push_str(&format!("\nDeck: {n}")),
+        Some(CsvDeck::Id(id)) => out.push_str(&format!("\nDeck: id {id}")),
+        Some(CsvDeck::Column(c)) => out.push_str(&format!("\nDeck: named in column {c}")),
+        None => {}
+    }
+    out.push_str(&format!(
+        "\nIf a note matches: {}; matched within: {}",
+        settings.dupe_resolution.name(),
+        settings.match_scope.name()
+    ));
+    for row in &info.preview {
+        out.push_str(&format!("\n  {}", row.join(" | ")));
+    }
+    out
+}
+
+/// A note type's id and field names by name (case-insensitive).
+fn notetype_by_name(actor: &CollectionActor, name: &str) -> Result<(i64, Vec<String>)> {
+    let Response::Edit(tanki_core::EditResponse::Notetypes(all)) = actor
+        .execute(Command::Notes(NoteCommand::Notetypes))
+        .map_err(core_error)?
+    else {
+        return Err(unexpected());
+    };
+    all.iter()
+        .find(|nt| nt.name.eq_ignore_ascii_case(name))
+        .map(|nt| (nt.id, nt.fields.iter().map(|f| f.name.clone()).collect()))
+        .ok_or_else(|| PackageError::new(format!("No note type named {name:?}")).into())
+}
+
+fn export_text(actor: &CollectionActor, args: &ExportArgs, json: bool) -> Result<String> {
+    if args.colpkg || args.with_scheduling || args.with_deck_configs || args.legacy || args.no_media
+    {
+        return Err(PackageError::new(
+            "A text export has no scheduling, deck options, media or package format; --colpkg, --with-scheduling, --with-deck-configs, --no-media and --legacy apply to .apkg and .colpkg files.",
+        )
+        .into());
+    }
+    if args.cards
+        && (args.with_tags || args.with_deck_column || args.with_notetype || args.with_guid)
+    {
+        return Err(PackageError::new(
+            "Card text has only a question and an answer column; --with-tags, --with-deck-column, --with-notetype and --with-guid apply to notes.",
+        )
+        .into());
+    }
+    if args.file.exists() && !args.force {
+        return Err(PackageError::new(format!(
+            "{} exists; use --force to overwrite it",
+            args.file.display()
+        ))
+        .into());
+    }
+    let selection = match (&args.deck, &args.query) {
+        (Some(name), _) => TextExportSelection::Deck(deck_id(actor, name)?),
+        (None, Some(query)) => TextExportSelection::Query(query.clone()),
+        (None, None) => TextExportSelection::All,
+    };
+    let path = absolute(&args.file)?;
+    let command = if args.cards {
+        TransferCommand::ExportCards {
+            path,
+            selection,
+            with_html: args.with_html,
+        }
+    } else {
+        TransferCommand::ExportNotes {
+            path,
+            selection,
+            with_html: args.with_html,
+            with_tags: args.with_tags,
+            with_deck: args.with_deck_column,
+            with_notetype: args.with_notetype,
+            with_guid: args.with_guid,
+        }
+    };
+    let TransferResponse::Exported { count } = run_transfer(actor, command)? else {
+        return Err(unexpected());
+    };
+    let what = if args.cards { "cards" } else { "notes" };
+    Ok(if json {
+        serde_json::json!({ "file": args.file, what: count }).to_string()
+    } else {
+        format!("Exported {count} {what} to {}", args.file.display())
     })
 }
 

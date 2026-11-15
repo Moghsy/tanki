@@ -324,6 +324,8 @@ const STUDY_DECKS: &[(&str, &str, &str, bool)] = &[
         false,
     ),
     ("Study::Media", "Study: Media", "", false),
+    ("Study::Rich", "", "Math, text layout, animation and bitmap rendering.", false),
+    ("Study::Occlusion", "", "Three shapes in each of the two occlusion modes.", false),
     ("Study::Later", "", "", false),
 ];
 
@@ -671,6 +673,8 @@ pub(crate) fn populate_study(col: &mut Collection) -> Result<()> {
         )?;
     }
 
+    populate_rich_study(col, deck_ids["Study::Rich"], deck_ids["Study::Occlusion"])?;
+
     let search = |col: &mut Collection, query: &str| -> Result<Vec<i64>> {
         let ids = SearchService::search_cards(
             col,
@@ -780,6 +784,153 @@ pub(crate) fn populate_study(col: &mut Collection) -> Result<()> {
             did: deck_ids[STUDY_DECK],
         },
     )?;
+    Ok(())
+}
+
+/// Phase 4 cards live in separate decks so the original media study session
+/// keeps its ordering, counts and timings.
+fn populate_rich_study(col: &mut Collection, rich_deck: i64, io_deck: i64) -> Result<()> {
+    let mut media = |name: &str, bytes: &[u8]| -> Result<String> {
+        Ok(MediaService::add_media_file(
+            col,
+            pb::media::AddMediaFileRequest {
+                desired_name: name.into(),
+                data: bytes.to_vec(),
+            },
+        )?
+        .val)
+    };
+    let gif = media(
+        "study-pulse.gif",
+        include_bytes!("../../../tests/fixtures/rich/pulse.gif"),
+    )?;
+    let io_image = media(
+        "study-occlusion.png",
+        include_bytes!("../../../tests/fixtures/rich/occlusion.png"),
+    )?;
+    let extracted = CardRenderingService::extract_latex(
+        col,
+        pb::card_rendering::ExtractLatexRequest {
+            text: "[latex]E=mc^2[/latex]".into(),
+            svg: false,
+            expand_clozes: false,
+        },
+    )?;
+    let latex = MediaService::add_media_file(
+        col,
+        pb::media::AddMediaFileRequest {
+            desired_name: extracted.latex[0].filename.clone(),
+            data: include_bytes!("../../../tests/fixtures/rich/latex-energy.png").to_vec(),
+        },
+    )?
+    .val;
+    let basic = stock(col, OriginalStockKind::Basic)?;
+    let add = |col: &mut Collection,
+               nt: &Notetype,
+               deck_id: i64,
+               tag: &str,
+               fields: &[(&str, String)]|
+     -> Result<()> {
+        let mut note = NotesService::new_note(col, pb::notetypes::NotetypeId { ntid: nt.id.0 })?;
+        for (name, value) in fields {
+            let index = nt
+                .fields
+                .iter()
+                .position(|f| f.name == *name)
+                .ok_or_else(|| CoreError::Other(format!("Missing fixture field {name}")))?;
+            note.fields[index] = value.clone();
+        }
+        note.tags = vec![format!("phase4::{tag}")];
+        let _ = NotesService::add_note(
+            col,
+            pb::notes::AddNoteRequest {
+                note: Some(note),
+                deck_id,
+            },
+        )?;
+        Ok(())
+    };
+    add(col, &basic, rich_deck, "math", &[
+        ("Front", r"Simple inline: \(\alpha^2 + \beta^2\)<br>Tall inline: \(\frac{1}{x+1}\)<br>Display: \[\sum_{i=1}^{n} i = \frac{n(n+1)}{2}\]<br>Chemistry: \[\ce{2H2 + O2 -> 2H2O}\]".into()),
+        ("Back", "Unicode inline, tall inline box, display math and mhchem.".into()),
+    ])?;
+    add(
+        col,
+        &basic,
+        rich_deck,
+        "legacy-latex",
+        &[
+            (
+                "Front",
+                format!(
+                    r#"A shipped legacy LaTeX image:<br><img class="latex" alt="E=mc^2" src="{latex}">"#
+                ),
+            ),
+            (
+                "Back",
+                "The black lettering becomes white in night mode; the PNG stays transparent."
+                    .into(),
+            ),
+        ],
+    )?;
+    add(col, &basic, rich_deck, "text-animation", &[
+        ("Front", format!(r#"<ruby>日本語<rt>にほんご</rt></ruby><div dir="rtl">שלום 123 עולם</div><table><tr><td>outer</td><td><table><tr><td>inner A</td><td>inner B</td></tr></table></td></tr></table><img src="{gif}" width="128" height="64">"#)),
+        ("Back", "Ruby above its base, Hebrew reordered by the app, a nested table and two GIF frames.".into()),
+    ])?;
+    let mut flex = Notetype {
+        name: "Study Rich CSS".into(),
+        fields: vec![NoteField::new("Front"), NoteField::new("Back")],
+        templates: vec![CardTemplate::new("Card 1", "{{Front}}", "{{FrontSide}}<hr id=answer>{{Back}}")],
+        config: custom_config(&basic, ".card { text-align:left; color:#202030; background:#f4f4fa; } .columns { display:flex; gap:24px; padding:20px; } .columns div { background:#bbddee; padding:12px; border-radius:10px; }"),
+        ..Default::default()
+    };
+    col.add_notetype(&mut flex, false)?;
+    add(
+        col,
+        &flex,
+        rich_deck,
+        "bitmap-css",
+        &[
+            (
+                "Front",
+                "<div class=columns><div>First column</div><div>Second column</div></div>".into(),
+            ),
+            (
+                "Back",
+                "Pin this note type to T2 for the flex layout.".into(),
+            ),
+        ],
+    )?;
+    let mut io = stock(col, OriginalStockKind::ImageOcclusion)?;
+    io.id = 0.into();
+    io.name = "Study Occlusion".into();
+    io.config.css.push_str("\n#image-occlusion-canvas { --active-shape-color:#cc3355; --inactive-shape-color:#ffdd77; --active-shape-border:1px #222222; --highlight-shape-color:#00000000; --highlight-shape-border:1px #cc3355; }");
+    col.add_notetype(&mut io, false)?;
+    for (tag, header, suffix) in [
+        ("io-all", "Hide All, Guess One — A / B / C", ":oi=1"),
+        ("io-one", "Hide One, Guess One — A / B / C", ""),
+    ] {
+        let occlusions = format!(
+            "{{{{c1::image-occlusion:rect:left=.075:top=.3:width=.22:height=.4{suffix}}}}}<br>\
+             {{{{c2::image-occlusion:ellipse:left=.39:top=.3:rx=.11:ry=.2:angle=150{suffix}}}}}<br>\
+             {{{{c3::image-occlusion:polygon:left=.71:top=.3:points=.71,.3 .94,.3 .94,.7 .71,.7{suffix}}}}}<br>\
+             {{{{c0::image-occlusion:text:left=.08:top=.06:text=Shapes:fs=.09:scale=1}}}}");
+        add(
+            col,
+            &io,
+            io_deck,
+            tag,
+            &[
+                ("Occlusion", occlusions),
+                ("Image", format!(r#"<img src="{io_image}">"#)),
+                ("Header", header.into()),
+                (
+                    "Back Extra",
+                    "A = red; B = green; C = blue. Toggle masks on the answer.".into(),
+                ),
+            ],
+        )?;
+    }
     Ok(())
 }
 

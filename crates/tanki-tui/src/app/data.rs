@@ -35,6 +35,32 @@ impl App<'_> {
     /// Where tanki's `config.toml` is (`None`: sync is unavailable).
     pub fn set_config(&mut self, path: Option<PathBuf>) {
         self.config_path = path;
+        if let Some(path) = &self.config_path {
+            match Config::load(path) {
+                Ok(config) => {
+                    if let Some(profile) = config.profiles.get(&self.profile_key()) {
+                        self.render_tiers = profile
+                            .render_tiers
+                            .iter()
+                            .map(|(id, tier)| {
+                                (
+                                    id.clone(),
+                                    match tier {
+                                        tanki_core::config::RenderTier::Text => {
+                                            tanki_render::tier::RenderTier::Text
+                                        }
+                                        tanki_core::config::RenderTier::Bitmap => {
+                                            tanki_render::tier::RenderTier::Bitmap
+                                        }
+                                    },
+                                )
+                            })
+                            .collect();
+                    }
+                }
+                Err(error) => self.error(error.to_string()),
+            }
+        }
     }
 
     /// True while a data operation runs or one of its screens is open.
@@ -254,7 +280,8 @@ impl App<'_> {
             return;
         }
         self.overlay = Some(Overlay::Prompt {
-            title: "Path of the .apkg deck package to import (a .colpkg asks to restore instead)"
+            title: "File to import: .apkg deck package, .csv/.tsv/.txt text, .json notes \
+                    (a .colpkg asks to restore instead)"
                 .into(),
             input: TextInput::default(),
             kind: PromptKind::ImportPath,
@@ -271,7 +298,8 @@ impl App<'_> {
         };
         self.overlay = Some(Overlay::Prompt {
             title: format!(
-                "Output file: .apkg exports {what}; .colpkg always exports the whole collection"
+                "Output file: .apkg or .txt/.tsv/.csv exports {what}; \
+                 .colpkg always exports the whole collection"
             ),
             input: TextInput::default(),
             kind: PromptKind::ExportPath,
@@ -345,9 +373,16 @@ impl App<'_> {
                 if !path.is_file() {
                     return self.error(format!("{} is not a file.", path.display()));
                 }
+                if self.open_text_import(&path) {
+                    return;
+                }
                 self.package_ui = Some(PackageUi::import(path));
             }
-            PromptKind::ExportPath => self.start_export(path),
+            PromptKind::ExportPath => {
+                if !self.open_text_export(&path) {
+                    self.start_export(path);
+                }
+            }
             PromptKind::SetDueDate => {}
         }
     }
@@ -355,7 +390,8 @@ impl App<'_> {
     fn start_export(&mut self, path: PathBuf) {
         let colpkg = has_extension(&path, "colpkg");
         if !colpkg && !has_extension(&path, "apkg") {
-            return self.error("The output file name must end in .apkg or .colpkg.");
+            return self
+                .error("The output file name must end in .apkg, .colpkg, .txt, .tsv or .csv.");
         }
         if path.exists() {
             return self.error(format!(

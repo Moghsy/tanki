@@ -88,7 +88,6 @@ pub enum Effect {
     CardChanged,
 }
 
-pub const CUSTOM_SCHEDULING_WARNING: &str = "This collection has a custom scheduling script. tanki does not run it, so cards are scheduled with Anki's standard rules.";
 pub const SCHEDULER_UPGRADE_MESSAGE: &str = "Your collection needs to be upgraded to the v3 scheduler before you can study. Upgrading changes the collection schema, so the next sync will be a one-way full sync.";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -144,6 +143,9 @@ pub fn media_tag(tag: &AudioTag) -> MediaTag {
 pub struct Reviewer {
     phase: Phase,
     card: Option<ReviewCard>,
+    /// Rendering the next queued card never answers or removes it. The UI
+    /// warms its optional bitmap cache while this card is on screen.
+    next_rendered: Option<RenderedCard>,
     counts: Counts,
     shown_at: Instant,
     answer_at: Option<Instant>,
@@ -154,7 +156,6 @@ pub struct Reviewer {
     timebox_pending: bool,
     auto_advance: bool,
     auto: Option<AutoTimer>,
-    warned_custom: bool,
     next_day_at: Option<i64>,
     /// Hint and `<details>` widgets the user opened (renderer keys).
     pub expanded: BTreeSet<String>,
@@ -165,6 +166,7 @@ impl Reviewer {
         Self {
             phase: Phase::Question,
             card: None,
+            next_rendered: None,
             counts: Counts::default(),
             shown_at: now.at,
             answer_at: None,
@@ -175,7 +177,6 @@ impl Reviewer {
             timebox_pending: false,
             auto_advance: false,
             auto: None,
-            warned_custom: false,
             next_day_at: None,
             expanded: BTreeSet::new(),
         }
@@ -188,6 +189,9 @@ impl Reviewer {
     }
     pub fn card(&self) -> Option<&ReviewCard> {
         self.card.as_ref()
+    }
+    pub fn next_rendered(&self) -> Option<&RenderedCard> {
+        self.next_rendered.as_ref()
     }
     pub fn counts(&self) -> Counts {
         self.counts
@@ -298,25 +302,33 @@ impl Reviewer {
     /// `Answer`). With `keep_same`, a card that is still on top keeps its
     /// phase and timer; only its queue data (counts, flag, intervals) update.
     fn refresh(&mut self, b: &dyn Backend, now: Now, keep_same: bool, fx: &mut Vec<Effect>) {
-        let queue = match backend::queue(b, 1) {
+        self.next_rendered = None;
+        let queue = match backend::queue(b, 2) {
             Ok(queue) => queue,
             Err(e) => {
                 fx.push(Effect::Error(e.to_string()));
                 return;
             }
         };
+        if let Some(error) = queue.custom_scheduling_error.as_ref() {
+            fx.push(Effect::Warning(error.clone()));
+        }
         self.counts = Counts {
             new: queue.new,
             learning: queue.learning,
             review: queue.review,
         };
-        let Some(top) = queue.cards.into_iter().next() else {
+        let mut queued = queue.cards.into_iter();
+        let Some(top) = queued.next() else {
             self.card = None;
             self.auto = None;
             self.typed = None;
             fx.push(Effect::Finished);
             return;
         };
+        if let Some(next) = queued.next() {
+            self.next_rendered = backend::render(b, next.id).ok();
+        }
         if keep_same && self.phase != Phase::Transition {
             if let Some(card) = self.card.as_mut().filter(|c| c.queued.id == top.id) {
                 card.queued = top;
@@ -377,13 +389,10 @@ impl Reviewer {
         };
         self.typed = matches!(card.rendered.type_answer, Some(TypeAnswer::Input { .. }))
             .then(TextInput::default);
-        let custom = card.config.custom_scheduling_set;
+
         fx.push(Effect::CardChanged);
         fx.extend(self.cue(CueKind::ShowQuestion));
-        if custom && !self.warned_custom {
-            self.warned_custom = true;
-            fx.push(Effect::Warning(CUSTOM_SCHEDULING_WARNING.into()));
-        }
+
         self.schedule_auto(now);
     }
 

@@ -14,11 +14,14 @@ use std::path::PathBuf;
 mod css;
 mod image_cache;
 mod layout;
+mod math;
 mod media;
+mod occlusion;
 mod paint;
 mod para;
 mod style;
 mod text;
+pub mod tier;
 
 pub use media::{image_cells, resolve as resolve_media, MediaRef, SizeRequest};
 
@@ -52,6 +55,9 @@ pub enum RubyMode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderOptions {
+    /// Explicit renderer tier. The classifier only suggests a tier; it never
+    /// enables a heavier renderer without a user choice.
+    pub tier: tier::RenderTier,
     /// Columns available for the card.
     pub width: u16,
     /// Rows visible at once; images are clamped to about 95% of this
@@ -80,6 +86,7 @@ pub struct RenderOptions {
 impl Default for RenderOptions {
     fn default() -> Self {
         Self {
+            tier: tier::RenderTier::Text,
             width: 80,
             viewport_rows: 24,
             cell_px: None,
@@ -96,6 +103,10 @@ impl Default for RenderOptions {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash, Serialize, Deserialize)]
 pub struct Style {
+    /// OSC 66 fractional font size, as a percentage of a cell. Zero means
+    /// ordinary terminal text; unsupported terminals retain normal sizing.
+    #[serde(default)]
+    pub text_scale: u8,
     pub fg: Option<Rgb>,
     pub bg: Option<Rgb>,
     pub bold: bool,
@@ -122,12 +133,46 @@ pub struct Line {
     pub spans: Vec<Span>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ImageSource {
     /// A file inside the media folder (already resolved and checked).
     File(PathBuf),
+    /// Legacy black-on-white LaTeX, inverted for a dark terminal.
+    InvertedFile(PathBuf),
+    /// Native image occlusion: local base image plus transparent SVG masks.
+    Occlusion { path: PathBuf, overlay: String },
+    /// A full-card bitmap produced by the optional background renderer.
+    Bitmap {
+        /// Stable identity assigned by the producer. Hashing a frame must not
+        /// walk its pixel buffer on every terminal redraw.
+        id: u64,
+        width: u32,
+        height: u32,
+        rgba: std::sync::Arc<Vec<u8>>,
+    },
     /// An inline `<svg>` element, serialised.
     Svg(String),
+}
+
+impl std::hash::Hash for ImageSource {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            Self::File(path) | Self::InvertedFile(path) => path.hash(state),
+            Self::Occlusion { path, overlay } => {
+                path.hash(state);
+                overlay.hash(state);
+            }
+            Self::Bitmap {
+                id, width, height, ..
+            } => {
+                id.hash(state);
+                width.hash(state);
+                height.hash(state);
+            }
+            Self::Svg(svg) => svg.hash(state),
+        }
+    }
 }
 
 /// A rectangle of cells reserved for an image. The cells are blank in
@@ -189,7 +234,7 @@ pub struct RenderedCard {
 /// Lays out one side. Pure and synchronous; image decoding is separate
 /// ([`ImageCache`]).
 pub fn render(side: &CardSide, options: &RenderOptions) -> RenderedCard {
-    layout::render(side, options)
+    tier::render(side, options)
 }
 
 /// Paints the text of `card` into `buf` inside `area`, starting at line
@@ -236,6 +281,23 @@ impl ImageCache {
         max_px: (u32, u32),
     ) -> Option<Result<std::sync::Arc<image::DynamicImage>, ImageError>> {
         self.inner.get(source, max_px)
+    }
+    /// Select a GIF frame by elapsed time; other images are unchanged.
+    pub fn get_at(
+        &self,
+        source: &ImageSource,
+        max_px: (u32, u32),
+        elapsed: std::time::Duration,
+    ) -> Option<Result<std::sync::Arc<image::DynamicImage>, ImageError>> {
+        self.inner.get_at(source, max_px, elapsed)
+    }
+    pub fn frame_index_at(
+        &self,
+        source: &ImageSource,
+        max_px: (u32, u32),
+        elapsed: std::time::Duration,
+    ) -> usize {
+        self.inner.frame_index_at(source, max_px, elapsed)
     }
     /// Receives a message whenever a requested image finishes, so the UI can redraw.
     pub fn subscribe(&self) -> std::sync::mpsc::Receiver<()> {

@@ -225,6 +225,7 @@ impl Backend for FakeBackend {
                     }
                 }
                 Response::Queue(Queue {
+                    custom_scheduling_error: None,
                     new: counts.0,
                     learning: counts.1,
                     review: counts.2,

@@ -241,6 +241,62 @@ fn scroll_clipping_and_repainting_the_same_area_replace_link_metadata() {
 }
 
 #[test]
+fn fractional_sizing_obeys_capabilities_clipping_and_links() {
+    for supported in [false, true] {
+        let links = Links::with_text_sizing(supported);
+        let renderer = LinkedRenderer::new(FixtureRenderer, links.clone());
+        let mut card = rendered(Some("https://example.org"), "日本");
+        card.lines[0].spans[0].style.text_scale = 50;
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 10, 3));
+        renderer.begin_frame();
+        renderer.paint(&card, 0, Rect::new(7, 1, 3, 1), &mut buffer);
+        renderer.finish_frame(&buffer, true);
+        let output = Output::default();
+        let mut backend = HyperlinkBackend::new(output.clone(), links.clone());
+        backend
+            .draw(Buffer::empty(buffer.area).diff_iter(&buffer))
+            .unwrap();
+        let bytes = output.take();
+        assert_eq!(bytes.contains("\x1b]66;"), supported);
+        assert!(bytes.contains(&open("https://example.org")));
+        if supported {
+            assert!(bytes.contains("n=5:d=10:w=2:v=2:h=2;日"));
+            assert!(!bytes.contains(";本\x1b\\"));
+            assert_eq!(
+                links.0.borrow().sizes.keys().copied().collect::<Vec<_>>(),
+                [(1, 7)]
+            );
+        }
+        renderer.obscure_links(Rect::new(7, 1, 3, 1));
+        renderer.finish_frame(&buffer, true);
+        assert!(links.0.borrow().sizes.is_empty());
+    }
+}
+
+#[test]
+fn removing_font_size_repaints_unchanged_cells() {
+    let links = Links::with_text_sizing(true);
+    let renderer = LinkedRenderer::new(FixtureRenderer, links.clone());
+    let output = Output::default();
+    let mut backend = HyperlinkBackend::new(output.clone(), links);
+    let area = Rect::new(0, 0, 10, 1);
+    let mut card = rendered(None, "tiny");
+    card.lines[0].spans[0].style.text_scale = 50;
+    let first = paint(&renderer, &card, area, true);
+    backend
+        .draw(Buffer::empty(first.area).diff_iter(&first))
+        .unwrap();
+    assert!(output.take().contains("\x1b]66;"));
+    card.lines[0].spans[0].style.text_scale = 0;
+    let second = paint(&renderer, &card, area, true);
+    assert!(first.diff(&second).is_empty());
+    backend.draw(first.diff_iter(&second)).unwrap();
+    let bytes = output.take();
+    assert!(bytes.contains("tiny"));
+    assert!(!bytes.contains("\x1b]66;"));
+}
+
+#[test]
 fn nonlink_widgets_can_occlude_identical_cells_without_leaking_the_anchor() {
     let links = Links::default();
     let renderer = LinkedRenderer::new(FixtureRenderer, links.clone());

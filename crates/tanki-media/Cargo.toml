@@ -9,5 +9,6 @@ publish.workspace = true
 rodio = { version = "0.23", default-features = false, features = ["playback", "flac", "mp3", "mp4", "vorbis", "wav", "symphonia-alac"] }
 serde_json = { workspace = true }
 tempfile = "3"
+libc = "0.2"
 
 

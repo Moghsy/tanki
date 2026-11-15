@@ -65,6 +65,15 @@ pub enum BrowserIntent {
     CardInfo(i64),
     /// Full-screen preview of this card.
     Preview(i64),
+    /// Find duplicates within this search.
+    FindDuplicates(String),
+    /// Export these rows as text: note ids in notes mode, else card ids.
+    ExportText {
+        notes: bool,
+        ids: Vec<i64>,
+    },
+    /// Change the note type of these notes.
+    ChangeNotetype(Vec<i64>),
     /// Create a filtered deck from this search.
     FilteredDeck(String),
     /// A search ran: `ProfileConfig::push_search` it and save the config.
@@ -528,6 +537,16 @@ impl BrowserUi {
             .min(self.sidebar_rows.len().saturating_sub(1));
     }
 
+    /// Shows `query`'s results, as if typed into the search bar (another
+    /// screen's request, e.g. a duplicate group's `nid:` list).
+    pub fn search(&mut self, backend: &dyn Backend, query: &str) {
+        self.visual = None;
+        self.selected.clear();
+        if let Err(error) = self.run_search(backend, query.to_owned(), None) {
+            self.message = Some(error.to_string());
+        }
+    }
+
     /// Runs `query` (already normalised); the cursor goes to `keep` when it
     /// is in the result, else to the first row.
     fn run_search(
@@ -888,6 +907,27 @@ impl BrowserUi {
                 return match self.current_card(backend) {
                     Ok(Some(id)) => BrowserIntent::CardInfo(id),
                     Ok(None) => BrowserIntent::None,
+                    Err(error) => {
+                        self.message = Some(error.to_string());
+                        BrowserIntent::None
+                    }
+                }
+            }
+            KeyCode::Char('X') => return BrowserIntent::FindDuplicates(self.query.clone()),
+            KeyCode::Char('E') => {
+                let ids = self.targets();
+                if ids.is_empty() {
+                    return BrowserIntent::None;
+                }
+                return BrowserIntent::ExportText {
+                    notes: self.mode() == BrowseMode::Notes,
+                    ids,
+                };
+            }
+            KeyCode::Char('N') => {
+                return match self.note_ids(backend) {
+                    Ok(ids) if !ids.is_empty() => BrowserIntent::ChangeNotetype(ids),
+                    Ok(_) => BrowserIntent::None,
                     Err(error) => {
                         self.message = Some(error.to_string());
                         BrowserIntent::None
@@ -1955,6 +1995,9 @@ impl BrowserUi {
                 ("i", "info"),
                 ("V", "full preview"),
                 ("F", "filtered deck"),
+                ("N", "change note type"),
+                ("X", "find duplicates"),
+                ("E", "export as text"),
                 ("w", "save search"),
                 ("u/C-r", "undo/redo"),
                 ("q", "close"),

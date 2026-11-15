@@ -41,13 +41,21 @@ pub fn safe_uri(uri: &str) -> bool {
 #[derive(Default)]
 struct FrameLinks {
     candidates: BTreeMap<Point, (String, Cell)>,
+    size_candidates: BTreeMap<Point, (u8, Cell)>,
     targets: BTreeMap<Point, String>,
+    sizes: BTreeMap<Point, u8>,
     cells: BTreeMap<Point, Cell>,
 }
 
 /// Shared by the renderer decorator and terminal backend on the UI thread.
 #[derive(Clone, Default)]
-pub struct Links(Rc<RefCell<FrameLinks>>);
+pub struct Links(Rc<RefCell<FrameLinks>>, bool);
+
+impl Links {
+    pub fn with_text_sizing(supported: bool) -> Self {
+        Self(Rc::default(), supported)
+    }
+}
 
 /// Retains the actual leading cells painted by a renderer. A one-row scratch
 /// buffer uses Ratatui's own clipping and grapheme rules, including CJK/emoji.
@@ -72,6 +80,7 @@ impl<R: CardRenderer> CardRenderer for LinkedRenderer<R> {
         let mut frame = self.links.0.borrow_mut();
         if !links_visible {
             frame.candidates.clear();
+            frame.size_candidates.clear();
         }
         // This is also the source of truth for href-only redraws. Do not replay
         // trailing cells of wide graphemes or cells owned by graphics protocols.
@@ -93,12 +102,23 @@ impl<R: CardRenderer> CardRenderer for LinkedRenderer<R> {
             .filter(|(point, (_, expected))| frame.cells.get(point) == Some(expected))
             .map(|(point, (target, _))| (*point, target.clone()))
             .collect();
+        frame.sizes = frame
+            .size_candidates
+            .iter()
+            .filter(|(point, (_, expected))| frame.cells.get(point) == Some(expected))
+            .map(|(point, (scale, _))| (*point, *scale))
+            .collect();
     }
     fn obscure_links(&self, area: Rect) {
         self.links
             .0
             .borrow_mut()
             .candidates
+            .retain(|&(y, x), _| !area.contains((x, y).into()));
+        self.links
+            .0
+            .borrow_mut()
+            .size_candidates
             .retain(|&(y, x), _| !area.contains((x, y).into()));
         self.inner.obscure_links(area);
     }
@@ -115,6 +135,9 @@ impl<R: CardRenderer> CardRenderer for LinkedRenderer<R> {
         // A later painting of the same area replaces all earlier link metadata.
         frame
             .candidates
+            .retain(|&(y, x), _| !area.contains((x, y).into()));
+        frame
+            .size_candidates
             .retain(|&(y, x), _| !area.contains((x, y).into()));
         let mut scratch = Buffer::empty(Rect::new(area.x, 0, area.width, 1));
         for (i, line) in card
@@ -137,13 +160,19 @@ impl<R: CardRenderer> CardRenderer for LinkedRenderer<R> {
                     (area.right() - x) as usize,
                     crate::services::to_ratatui_style(&span.style),
                 );
-                if let Some(target) = span.link.as_deref().filter(|target| safe_uri(target)) {
-                    while x < next {
+                let target = span.link.as_deref().filter(|target| safe_uri(target));
+                while x < next {
+                    if let Some(target) = target {
                         frame
                             .candidates
                             .insert((y, x), (target.to_owned(), buffer[(x, y)].clone()));
-                        x = x.saturating_add(scratch[(x, 0)].cell_width().max(1));
                     }
+                    if self.links.1 && (1..100).contains(&span.style.text_scale) {
+                        frame
+                            .size_candidates
+                            .insert((y, x), (span.style.text_scale, buffer[(x, y)].clone()));
+                    }
+                    x = x.saturating_add(scratch[(x, 0)].cell_width().max(1));
                 }
                 x = next;
             }
@@ -157,6 +186,7 @@ pub struct HyperlinkBackend<W: Write> {
     inner: CrosstermBackend<W>,
     links: Links,
     previous: BTreeMap<Point, String>,
+    previous_sizes: BTreeMap<Point, u8>,
 }
 
 impl<W: Write> HyperlinkBackend<W> {
@@ -165,6 +195,7 @@ impl<W: Write> HyperlinkBackend<W> {
             inner: CrosstermBackend::new(writer),
             links,
             previous: BTreeMap::new(),
+            previous_sizes: BTreeMap::new(),
         }
     }
 }
@@ -199,6 +230,13 @@ impl<W: Write> Backend for HyperlinkBackend<W> {
                 dirty.entry(point).or_insert_with(|| cell.clone());
             }
         }
+        for point in self.previous_sizes.keys().chain(frame.sizes.keys()) {
+            if self.previous_sizes.get(point) != frame.sizes.get(point) {
+                if let Some(cell) = frame.cells.get(point) {
+                    dirty.entry(*point).or_insert_with(|| cell.clone());
+                }
+            }
+        }
         self.inner.write_all(CLOSE)?;
         let cells: Vec<_> = dirty.iter().collect();
         let drawn = (|| {
@@ -217,6 +255,22 @@ impl<W: Write> Backend for HyperlinkBackend<W> {
                         .iter()
                         .map(|((y, x), cell)| (*x, *y, *cell)),
                 )?;
+                for ((y, x), cell) in &cells[start..end] {
+                    let Some(scale) = frame.sizes.get(&(*y, *x)) else {
+                        continue;
+                    };
+                    let Some(sequence) =
+                        tanki_term::sized_text(cell.symbol(), *scale, cell.cell_width())
+                    else {
+                        continue;
+                    };
+                    // Set the cell's style through Crossterm, then replace its
+                    // glyph at the same cursor position. OSC 66 stays outside
+                    // Ratatui's symbols, so cell widths and links remain valid.
+                    self.inner.draw(std::iter::once((*x, *y, *cell)))?;
+                    self.inner.set_cursor_position(Position::new(*x, *y))?;
+                    self.inner.write_all(sequence.as_bytes())?;
+                }
                 // Always close, including before drawing unrelated/image cells.
                 self.inner.write_all(CLOSE)?;
                 start = end;
@@ -226,6 +280,7 @@ impl<W: Write> Backend for HyperlinkBackend<W> {
         let closed = self.inner.write_all(CLOSE);
         drawn.and(closed)?;
         self.previous = frame.targets.clone();
+        self.previous_sizes = frame.sizes.clone();
         Ok(())
     }
     fn hide_cursor(&mut self) -> io::Result<()> {
@@ -242,11 +297,13 @@ impl<W: Write> Backend for HyperlinkBackend<W> {
     }
     fn clear(&mut self) -> io::Result<()> {
         self.previous.clear();
+        self.previous_sizes.clear();
         self.inner.write_all(CLOSE)?;
         self.inner.clear()
     }
     fn clear_region(&mut self, clear_type: ClearType) -> io::Result<()> {
         self.previous.clear();
+        self.previous_sizes.clear();
         self.inner.write_all(CLOSE)?;
         self.inner.clear_region(clear_type)
     }

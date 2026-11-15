@@ -23,6 +23,14 @@ pub trait Backend {
             "This collection does not support data operations".into(),
         ))
     }
+    /// Queues any long command (Phase 5: FSRS, check database/media, CSV
+    /// import) and returns at once; poll the handle from the event loop.
+    /// Progress and cancel use `data_progress` / `cancel_data`.
+    fn start(&self, _command: Command) -> Result<Box<dyn CommandOp>> {
+        Err(CoreError::Other(
+            "This collection does not support background commands".into(),
+        ))
+    }
     /// Progress of the running data operation.
     fn data_progress(&self) -> OperationProgress {
         OperationProgress::default()
@@ -37,6 +45,18 @@ pub trait DataOp {
     fn poll(&self) -> Result<Option<DataResponse>>;
 }
 
+/// A queued command of any kind (`Backend::start`).
+pub trait CommandOp {
+    /// `Ok(None)` while the actor is still working.
+    fn poll(&self) -> Result<Option<Response>>;
+}
+
+impl CommandOp for tanki_core::PendingCommand {
+    fn poll(&self) -> Result<Option<Response>> {
+        self.try_recv()
+    }
+}
+
 impl DataOp for tanki_core::PendingOperation {
     fn poll(&self) -> Result<Option<DataResponse>> {
         self.try_recv()
@@ -49,6 +69,9 @@ impl Backend for CollectionActor {
     }
     fn start_data(&self, command: DataCommand) -> Result<Box<dyn DataOp>> {
         Ok(Box::new(CollectionActor::start_data(self, command)?))
+    }
+    fn start(&self, command: Command) -> Result<Box<dyn CommandOp>> {
+        Ok(Box::new(CollectionActor::start(self, command)?))
     }
     fn data_progress(&self) -> OperationProgress {
         self.progress()
@@ -97,6 +120,11 @@ impl Backend for Tracked<'_> {
     }
     fn start_data(&self, command: DataCommand) -> Result<Box<dyn DataOp>> {
         self.inner.start_data(command)
+    }
+    /// Results of started commands are not counted as own mutations; their
+    /// broadcast refreshes the screen like an outside change.
+    fn start(&self, command: Command) -> Result<Box<dyn CommandOp>> {
+        self.inner.start(command)
     }
     fn data_progress(&self) -> OperationProgress {
         self.inner.data_progress()

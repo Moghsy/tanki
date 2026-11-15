@@ -1,6 +1,9 @@
  Question
  ─┌ Keys: Review ────────────────────────────────────────────────────────────┐
  A│Review                                                                    │
+  │  i                      Card info                                        │
+  │  o                      Deck options                                     │
+  │  Ctrl+Alt+I             Previous card info                               │
   │  Space, Enter           Show answer / answer Good                        │
   │  1                      Answer Again                                     │
   │  2                      Answer Hard                                      │
@@ -8,17 +11,14 @@
   │  4                      Answer Easy                                      │
   │  u                      Undo                                             │
   │  m                      More actions                                     │
+  │  Shift+M                Show / hide image occlusion masks                │
+  │  v                      Start / stop recording own voice                 │
+  │  Shift+V                Replay own voice                                 │
+  │  Ctrl+T                 Switch text / bitmap for this note type          │
   │  r, F5                  Replay audio                                     │
   │  5                      Pause / resume audio                             │
   │  6                      Audio -5s                                        │
-  │  7                      Audio +5s                                        │
-  │  p                      Play the next audio button                       │
-  │  Ctrl+1, Alt+1          Toggle flag 1                                    │
-  │  Ctrl+2, Alt+2          Toggle flag 2                                    │
-  │  Ctrl+3, Alt+3          Toggle flag 3                                    │
-  │  Ctrl+4, Alt+4          Toggle flag 4                                    │
-  │  Ctrl+5, Alt+5          Toggle flag 5                                    │
-──│  Ctrl+6, Alt+6          Toggle flag 6                                    │──
+──│  7                      Audio +5s                                        │──
   └──────────────────────────────────────────────────────────────────────────┘
                   1 Again      2 Hard      3 Good      4 Easy            More m
  fixture │ 1 0 0                                         ♪ on │ ▣ text │ ? help
@@ -29,6 +29,9 @@ Buffer {
         " Question                                                                       ",
         " ─┌ Keys: Review ────────────────────────────────────────────────────────────┐  ",
         " A│Review                                                                    │  ",
+        "  │  i                      Card info                                        │  ",
+        "  │  o                      Deck options                                     │  ",
+        "  │  Ctrl+Alt+I             Previous card info                               │  ",
         "  │  Space, Enter           Show answer / answer Good                        │  ",
         "  │  1                      Answer Again                                     │  ",
         "  │  2                      Answer Hard                                      │  ",
@@ -36,17 +39,14 @@ Buffer {
         "  │  4                      Answer Easy                                      │  ",
         "  │  u                      Undo                                             │  ",
         "  │  m                      More actions                                     │  ",
+        "  │  Shift+M                Show / hide image occlusion masks                │  ",
+        "  │  v                      Start / stop recording own voice                 │  ",
+        "  │  Shift+V                Replay own voice                                 │  ",
+        "  │  Ctrl+T                 Switch text / bitmap for this note type          │  ",
         "  │  r, F5                  Replay audio                                     │  ",
         "  │  5                      Pause / resume audio                             │  ",
         "  │  6                      Audio -5s                                        │  ",
-        "  │  7                      Audio +5s                                        │  ",
-        "  │  p                      Play the next audio button                       │  ",
-        "  │  Ctrl+1, Alt+1          Toggle flag 1                                    │  ",
-        "  │  Ctrl+2, Alt+2          Toggle flag 2                                    │  ",
-        "  │  Ctrl+3, Alt+3          Toggle flag 3                                    │  ",
-        "  │  Ctrl+4, Alt+4          Toggle flag 4                                    │  ",
-        "  │  Ctrl+5, Alt+5          Toggle flag 5                                    │  ",
-        "──│  Ctrl+6, Alt+6          Toggle flag 6                                    │──",
+        "──│  7                      Audio +5s                                        │──",
         "  └──────────────────────────────────────────────────────────────────────────┘  ",
         "                  1 Again      2 Hard      3 Good      4 Easy            More m ",
         " fixture │ 1 0 0                                         ♪ on │ ▣ text │ ? help ",

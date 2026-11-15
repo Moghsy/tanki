@@ -410,9 +410,9 @@ fn export_validates_names_and_picks_the_selection() {
     let b = FakeBackend::new(vec![]);
     let mut a = app(&b, &temp, false);
     a.dispatch(Action::Export);
-    type_text(&mut a, temp.0.join("out.txt").to_str().unwrap());
+    type_text(&mut a, temp.0.join("out.doc").to_str().unwrap());
     press(&mut a, KeyCode::Enter);
-    assert!(message(&a).contains(".apkg or .colpkg"));
+    assert!(message(&a).contains(".apkg, .colpkg"));
 
     let taken = temp.0.join("taken.apkg");
     std::fs::write(&taken, b"x").unwrap();
@@ -514,6 +514,35 @@ fn new_actions_are_in_the_palette_and_help() {
         assert!(names.iter().any(|n| n == wanted), "{wanted} in {names:?}");
     }
     a.dispatch(Action::Help);
-    let text = screen_text(&mut a);
+    // The deck list has more keys than fit: scroll until the row shows.
+    let mut text = screen_text(&mut a);
+    for _ in 0..60 {
+        if text.contains("Sync with the sync server") {
+            break;
+        }
+        press(&mut a, KeyCode::Down);
+        text = screen_text(&mut a);
+    }
     assert!(text.contains("Sync with the sync server"), "{text}");
+}
+
+#[test]
+fn shared_decks_open_ankiweb_in_the_web_browser() {
+    let temp = Temp::new();
+    let b = FakeBackend::new(vec![]);
+    let mut a = app(&b, &temp, false);
+    let opened = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let seen = opened.clone();
+    a.services.opener = Box::new(move |path| {
+        seen.borrow_mut().push(path.to_path_buf());
+        Ok(())
+    });
+    a.dispatch(Action::SharedDecks);
+    assert_eq!(
+        *opened.borrow(),
+        [std::path::PathBuf::from(
+            "https://ankiweb.net/shared/decks/"
+        )]
+    );
+    assert!(message(&a).contains("import"), "{}", message(&a));
 }

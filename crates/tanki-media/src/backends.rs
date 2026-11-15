@@ -6,22 +6,35 @@ use std::time::Duration;
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player};
 
 use crate::engine::{Backend, Selected};
-use crate::{AudioConfig, BackendChoice, BackendStatus};
+use crate::{AudioConfig, BackendChoice, BackendStatus, MediaTag, PlaybackOptions, VideoOutput};
 
-pub(crate) fn select(config: &AudioConfig) -> Selected {
+pub(crate) fn select(config: &AudioConfig, options: &PlaybackOptions) -> Selected {
+    let selected = select_audio(config, options.video);
+    match selected {
+        Selected::Inactive(BackendStatus::Off) => selected,
+        Selected::Inactive(status) => {
+            Selected::Active(Box::new(WithSpeech::new(None, options)), status)
+        }
+        Selected::Active(backend, status) => {
+            Selected::Active(Box::new(WithSpeech::new(Some(backend), options)), status)
+        }
+    }
+}
+
+fn select_audio(config: &AudioConfig, video: VideoOutput) -> Selected {
     match config.backend {
         BackendChoice::Off => Selected::Inactive(BackendStatus::Off),
         BackendChoice::Builtin => builtin_or_none(),
         BackendChoice::Mpv => match find_mpv(config.mpv.as_deref()) {
             None => Selected::Inactive(BackendStatus::NoDevice("mpv not found".into())),
-            Some(path) => match mpv::Mpv::start(&path) {
+            Some(path) => match mpv::Mpv::start(&path, video) {
                 Ok(m) => Selected::Active(Box::new(m), BackendStatus::Mpv),
                 Err(e) => Selected::Inactive(BackendStatus::NoDevice(format!("mpv: {e}"))),
             },
         },
         BackendChoice::Auto => {
             if let Some(path) = find_mpv(config.mpv.as_deref()) {
-                if let Ok(m) = mpv::Mpv::start(&path) {
+                if let Ok(m) = mpv::Mpv::start(&path, video) {
                     return Selected::Active(Box::new(m), BackendStatus::Mpv);
                 }
             }
@@ -137,21 +150,42 @@ mod mpv {
         sock: UnixStream,
         events: Receiver<Ev>,
         playing: bool,
+        video: crate::VideoOutput,
         seen_active: bool,
         _dir: tempfile::TempDir,
     }
 
+    fn video_command(exe: &Path, video: crate::VideoOutput) -> Command {
+        let mut command = Command::new(exe);
+        command.arg("--no-config");
+        match video {
+            crate::VideoOutput::Window => {}
+            crate::VideoOutput::Kitty => {
+                command.arg("--vo=kitty");
+            }
+            crate::VideoOutput::Sixel => {
+                command.arg("--vo=sixel");
+            }
+            crate::VideoOutput::Blocks => {
+                command.arg("--vo=tct");
+            }
+        }
+        command
+    }
+
     impl Mpv {
-        pub(super) fn start(exe: &Path) -> Result<Self, String> {
+        pub(super) fn start(exe: &Path, video: crate::VideoOutput) -> Result<Self, String> {
             let dir = tempfile::Builder::new()
                 .prefix("tanki-mpv-")
                 .tempdir()
                 .map_err(|e| e.to_string())?;
             let sock_path = dir.path().join("ipc.sock");
-            let mut child = Command::new(exe)
+            let mut command = video_command(exe, video);
+            let mut child = command
                 .args([
                     "--idle",
                     "--no-terminal",
+                    "--input-terminal=no",
                     "--force-window=no",
                     "--audio-display=no",
                     "--keep-open=no",
@@ -161,7 +195,11 @@ mod mpv {
                 ])
                 .arg(format!("--input-ipc-server={}", sock_path.display()))
                 .stdin(Stdio::null())
-                .stdout(Stdio::null())
+                .stdout(if video == crate::VideoOutput::Window {
+                    Stdio::null()
+                } else {
+                    Stdio::inherit()
+                })
                 .stderr(Stdio::null())
                 .spawn()
                 .map_err(|e| format!("cannot start mpv: {e}"))?;
@@ -197,6 +235,7 @@ mod mpv {
                 sock,
                 events,
                 playing: false,
+                video,
                 seen_active: false,
                 _dir: dir,
             };
@@ -230,6 +269,9 @@ mod mpv {
     }
 
     impl Backend for Mpv {
+        fn takes_terminal(&self, path: &Path) -> bool {
+            self.video != crate::VideoOutput::Window && super::is_video(path)
+        }
         fn play(&mut self, path: &Path) -> Result<(), String> {
             // pause persists across files in mpv
             self.send(&serde_json::json!(["set_property", "pause", false]))?;
@@ -244,7 +286,18 @@ mod mpv {
             Ok(())
         }
         fn stop(&mut self) {
+            while self.events.try_recv().is_ok() {}
+            let was_playing = self.playing;
             let _ = self.send(&serde_json::json!(["stop"]));
+            if was_playing && self.video != crate::VideoOutput::Window {
+                let deadline = Instant::now() + Duration::from_millis(250);
+                while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+                    match self.events.recv_timeout(remaining) {
+                        Ok(Ev::IdleActive(true) | Ev::EndFile(_)) | Err(_) => break,
+                        _ => {}
+                    }
+                }
+            }
             self.playing = false;
         }
         fn toggle_pause(&mut self) {
@@ -291,6 +344,29 @@ mod mpv {
         use super::*;
 
         #[test]
+        fn video_protocol_is_only_selected_by_explicit_output_mode() {
+            for (mode, flag) in [
+                (crate::VideoOutput::Window, None),
+                (crate::VideoOutput::Kitty, Some("--vo=kitty")),
+                (crate::VideoOutput::Sixel, Some("--vo=sixel")),
+                (crate::VideoOutput::Blocks, Some("--vo=tct")),
+            ] {
+                let command = video_command(Path::new("mpv"), mode);
+                let args: Vec<_> = command
+                    .get_args()
+                    .map(|arg| arg.to_string_lossy().into_owned())
+                    .collect();
+                assert!(args.iter().any(|arg| arg == "--no-config"));
+                assert_eq!(
+                    args.iter()
+                        .find(|arg| arg.starts_with("--vo="))
+                        .map(String::as_str),
+                    flag
+                );
+            }
+        }
+
+        #[test]
         fn parses_events() {
             assert!(matches!(
                 parse_event(
@@ -313,7 +389,7 @@ mod mpv {
                 return;
             };
             // --ao=null is not set by Mpv::start, so only check start/stop/drop.
-            let mut m = Mpv::start(&exe).expect("start mpv");
+            let mut m = Mpv::start(&exe, crate::VideoOutput::Window).expect("start mpv");
             assert!(!m.finished());
             m.stop();
         }
@@ -326,7 +402,7 @@ mod mpv {
     use std::path::Path;
     pub(super) struct Mpv;
     impl Mpv {
-        pub(super) fn start(_exe: &Path) -> Result<Self, String> {
+        pub(super) fn start(_exe: &Path, _video: crate::VideoOutput) -> Result<Self, String> {
             Err("mpv IPC is only supported on Unix".into())
         }
     }
@@ -343,6 +419,126 @@ mod mpv {
             false
         }
     }
+}
+
+/// One queue routes speech to its local engine and audio/video to the normal
+/// player. Piper synthesis is asynchronous, followed by ordinary WAV playback.
+struct WithSpeech {
+    audio: Option<Box<dyn Backend>>,
+    speech: crate::speech::Speech,
+    speaking: bool,
+    paused: bool,
+    error: Option<String>,
+}
+impl WithSpeech {
+    fn new(audio: Option<Box<dyn Backend>>, options: &PlaybackOptions) -> Self {
+        Self {
+            audio,
+            speech: crate::speech::Speech::new(options.tts.clone()),
+            speaking: false,
+            paused: false,
+            error: None,
+        }
+    }
+}
+impl Backend for WithSpeech {
+    fn takes_terminal(&self, path: &Path) -> bool {
+        self.audio
+            .as_ref()
+            .is_some_and(|audio| audio.takes_terminal(path))
+    }
+    fn play(&mut self, path: &Path) -> Result<(), String> {
+        self.speaking = false;
+        self.audio
+            .as_mut()
+            .ok_or("no audio output device")?
+            .play(path)
+    }
+    fn play_tts(&mut self, tag: &MediaTag) -> Result<(), String> {
+        self.speech.play(tag)?;
+        self.speaking = true;
+        self.paused = false;
+        Ok(())
+    }
+    fn stop(&mut self) {
+        self.speech.stop();
+        if let Some(b) = self.audio.as_mut() {
+            b.stop();
+        }
+        self.speaking = false;
+        self.paused = false;
+    }
+    fn toggle_pause(&mut self) {
+        if self.speaking {
+            self.paused = !self.paused;
+            self.speech.pause(self.paused);
+        } else if let Some(b) = self.audio.as_mut() {
+            b.toggle_pause();
+        }
+    }
+    fn seek(&mut self, seconds: f64) -> Result<(), String> {
+        if self.speaking {
+            Err("seeking is unavailable during text to speech".into())
+        } else {
+            self.audio
+                .as_mut()
+                .ok_or("no audio output device")?
+                .seek(seconds)
+        }
+    }
+    fn finished(&mut self) -> bool {
+        if self.speaking {
+            if !self.speech.finished() {
+                return false;
+            }
+            self.error = self.speech.take_error();
+            if let Some(path) = self.speech.take_generated() {
+                self.speaking = false;
+                match self
+                    .audio
+                    .as_mut()
+                    .ok_or("Piper playback needs an audio output device".into())
+                    .and_then(|b| b.play(&path))
+                {
+                    Ok(()) => return false,
+                    Err(e) => self.error = Some(e),
+                }
+            }
+            self.speaking = false;
+            true
+        } else {
+            self.audio.as_mut().is_none_or(|b| b.finished())
+        }
+    }
+    fn take_error(&mut self) -> Option<String> {
+        self.error.take()
+    }
+}
+
+fn is_video(path: &Path) -> bool {
+    // Unknown containers can contain a video stream. Reserve stdout for them
+    // too instead of racing mpv's first frame with the TUI.
+    !path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "mp3"
+                    | "wav"
+                    | "flac"
+                    | "m4a"
+                    | "aac"
+                    | "alac"
+                    | "ogg"
+                    | "oga"
+                    | "opus"
+                    | "spx"
+                    | "aiff"
+                    | "aif"
+                    | "caf"
+            )
+        })
 }
 
 #[cfg(test)]
@@ -399,6 +595,9 @@ mod tests {
 
     #[test]
     fn builtin_plays_wav_or_reports_no_device() {
+        if std::env::var_os("TANKI_TEST_AUDIO_DEVICE").is_none() {
+            return;
+        }
         use crate::{Audio, AudioEvent, MediaTag};
         let dir = tempfile::tempdir().unwrap();
         write_wav(&dir.path().join("t.wav"));
