@@ -58,7 +58,9 @@ install -Dm755 target/release/tanki ~/.local/bin/tanki
 ```
 
 The optional `blitz` feature (`-p tanki-cli --features blitz`) adds the T2
-rendering tier for heavily styled cards.
+rendering tier for heavily styled cards. On Linux, building this feature also
+requires the Fontconfig development headers (`libfontconfig1-dev` on
+Debian/Ubuntu).
 
 Distribution packages (Homebrew, AUR, Nix) will be added when tanki is
 published.

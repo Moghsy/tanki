@@ -73,6 +73,8 @@ and leave that card's standard scheduling states unchanged.
 
 Prerequisites: Rust 1.97.1, a C compiler, protoc (31.1 recommended), and the ALSA development headers plus pkg-config on Linux (`libasound2-dev` and `pkg-config` on Debian/Ubuntu). Install these explicitly; setup does not download executable tools.
 
+Building with `--all-features` or `--features blitz` also requires the Fontconfig development headers (`libfontconfig1-dev` on Debian/Ubuntu).
+
 ```sh
 export PROTOC="$HOME/.local/bin/protoc" # or your installed protoc path
 cargo xtask setup
