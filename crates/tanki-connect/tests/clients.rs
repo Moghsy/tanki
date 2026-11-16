@@ -379,3 +379,35 @@ fn create_model_builds_a_normal_note_type_and_refuses_duplicates() {
         );
     });
 }
+
+#[test]
+fn model_templates_can_be_read_and_updated_without_a_schema_change() {
+    with_server(|addr, _| {
+        let before = result(addr, "modelTemplates", json!({"modelName": "Basic"}));
+        let name = before.as_object().unwrap().keys().next().unwrap().clone();
+        assert_eq!(before[&name]["Front"], "{{Front}}");
+        result(
+            addr,
+            "updateModelTemplates",
+            json!({"model": {"name": "Basic", "templates": {
+                name.clone(): {"Back": "{{FrontSide}}<hr id=answer>{{Back}}<i>badge</i>"}}}}),
+        );
+        let after = result(addr, "modelTemplates", json!({"modelName": "Basic"}));
+        assert_eq!(
+            after[&name]["Front"], "{{Front}}",
+            "unspecified text is kept"
+        );
+        assert!(after[&name]["Back"]
+            .as_str()
+            .unwrap()
+            .ends_with("<i>badge</i>"));
+        for bad in [
+            json!({"model": {"name": "Basic", "templates": {"Nope": {"Back": "x"}}}}),
+            json!({"model": {"name": "Basic", "templates": {name.clone(): {"Back": "{{missing}}"}}}}),
+            json!({"model": {"name": "Missing", "templates": {}}}),
+        ] {
+            let response = call(addr, v6("updateModelTemplates", bad));
+            assert!(!response["error"].is_null(), "{response}");
+        }
+    });
+}

@@ -31,6 +31,10 @@ code-tour in Neovim"). The hint is tied to the card id, so a late reply never
 lands on the next card; empty text clears it, and a dropped plugin's hint is
 removed.
 
+The plugin adds a badge to its note type's back template and upgrades the
+first-release template in place, using `modelTemplates` and
+`updateModelTemplates` (text-only edits, so no schema change).
+
 Implementation notes for Phase 4:
 
 - The plugin lives in the sibling repository `tanki-code-tour` (Rust, no tanki

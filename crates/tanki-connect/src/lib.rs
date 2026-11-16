@@ -12,6 +12,8 @@ const ACTIONS: &[&str] = &[
     "modelFieldNames",
     "modelFieldsOnTemplates",
     "createModel",
+    "modelTemplates",
+    "updateModelTemplates",
     "findNotes",
     "findCards",
     "notesInfo",
@@ -163,6 +165,68 @@ fn manage_notetype(
 ) -> std::result::Result<tanki_core::NotetypeResponse, String> {
     match execute(backend, Command::Manage(ManageCommand::Notetypes(command)))? {
         Response::Manage(ManageResponse::Notetypes(r)) => Ok(r),
+        _ => Err("unexpected core response".into()),
+    }
+}
+
+fn notetype_detail(
+    backend: &dyn ConnectBackend,
+    name: &str,
+) -> std::result::Result<tanki_core::notetypes::NotetypeDetail, String> {
+    let id = model(backend, name)?.id;
+    match manage_notetype(backend, tanki_core::NotetypeCommand::Get { id })? {
+        tanki_core::NotetypeResponse::Detail(d) => Ok(d),
+        _ => Err("unexpected core response".into()),
+    }
+}
+
+/// AnkiConnect `modelTemplates`: `{template name: {Front, Back}}`.
+fn model_templates(backend: &dyn ConnectBackend, name: &str) -> ApiResult {
+    let detail = notetype_detail(backend, name)?;
+    Ok(Value::Object(
+        detail
+            .templates
+            .into_iter()
+            .map(|t| (t.name, json!({"Front": t.question, "Back": t.answer})))
+            .collect(),
+    ))
+}
+
+/// AnkiConnect `updateModelTemplates`: replaces the Front/Back text of the named
+/// card types. Text-only, so it is not a schema change.
+fn update_model_templates(backend: &dyn ConnectBackend, params: &Value) -> ApiResult {
+    use tanki_core::notetypes::NotetypeEdit;
+    let name = params["name"].as_str().ok_or("invalid model name")?;
+    let templates = params["templates"].as_object().ok_or("invalid templates")?;
+    let detail = notetype_detail(backend, name)?;
+    let mut edits = Vec::new();
+    for (template_name, texts) in templates {
+        let index = detail
+            .templates
+            .iter()
+            .position(|t| &t.name == template_name)
+            .ok_or_else(|| format!("template was not found: {template_name}"))?;
+        let mut template = detail.templates[index].clone();
+        if let Some(front) = texts["Front"].as_str() {
+            template.question = front.to_owned();
+        }
+        if let Some(back) = texts["Back"].as_str() {
+            template.answer = back.to_owned();
+        }
+        edits.push(NotetypeEdit::SetTemplate { index, template });
+    }
+    match manage_notetype(
+        backend,
+        tanki_core::NotetypeCommand::Edit {
+            id: detail.id,
+            edits,
+            confirmed: false,
+        },
+    )? {
+        tanki_core::NotetypeResponse::Saved { .. } => Ok(Value::Null),
+        tanki_core::NotetypeResponse::Rejected(problem) => {
+            Err(format!("template rejected: {problem:?}"))
+        }
         _ => Err("unexpected core response".into()),
     }
 }
@@ -742,6 +806,8 @@ fn action(backend: &dyn ConnectBackend, action: &str, p: &Value) -> ApiResult {
             }
         }
         "createModel" => create_model(backend, p)?,
+        "modelTemplates" => model_templates(backend, text(p, "modelName")?)?,
+        "updateModelTemplates" => update_model_templates(backend, &p["model"])?,
         "findNotes" | "findCards" | "guiBrowse" => {
             let Response::Edit(EditResponse::Ids(found)) = execute(
                 backend,
