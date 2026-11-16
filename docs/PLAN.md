@@ -772,6 +772,9 @@ Priority:
 2. [x] **AnkiConnect-compatible API** (`tanki-connect`, `tanki serve`): start with the subset in 8.14; verify against a real client. Worth it only for users who add cards from other tools (Yomitan, browser extensions, editor plugins).
 3. [x] **Custom scheduling JS**: QuickJS with protobuf-JSON parity, async jobs, context/custom-data support, resource limits and failure warnings. Matters only for collections whose custom scheduling script is non-empty (deck options → Advanced); the user checks their own profile (rule 1).
 
+4. [x] **Neovim saved code-tour cards** (user requested, 2026-11-15): typed note references, CLI creation/attachment, add/edit picker, held review, Herdr reader launch and lazy Claude connection. See `docs/neovim.md` and `docs/implementation/neovim-code-tour-plan.md`.
+5. [ ] **Plugins** (user requested, 2026-11-16): out-of-process plugins with a closed hook catalogue and user-granted manifests; code-tour becomes the first plugin. Phase 2 (`tanki-plugin` crate) done; hooks in the TUI, code-tour migration and docs pending. See `docs/implementation/plugins.md`.
+
 Optional (low value in a terminal; existing paths cover them):
 
 - **T3 tier**: headless Chrome over CDP behind a cargo feature. Only for cards that need JavaScript; the browser escape hatch (`w`) already handles them.
@@ -831,6 +834,7 @@ Each item names the phase that resolves it. Replace the entry with the result wh
 | Kitty graphics in VS Code's terminal; placeholders in Konsole; bidi per terminal; text sizing outside kitty | R8 | Phase 4, best effort |
 | Exact browser output for indent/justify markup; prevalence of JS in shared decks | R3, R7 | Phase 3–4 corpus |
 | **AnkiConnect subset (2026-11-15): 32 actions.** Fixture HTTP replays cover Yomitan v2 mining/discovery and Obsidian-to-Anki v6 nested batches, updates, media, deck moves and tags. Old-version errors remain envelopes; nested requests use their own versions. These are source-derived protocol replays, not interactive extension sessions. See `crates/tanki-connect/tests/clients.rs` and `docs/implementation/phase-6-interfaces.md`. | R9 | Phase 6 verified |
+| **Neovim tour integration (2026-11-15).** Synthetic actor tests verify note references, reordered fields, undo, and package round trips. Review tests cover timing, launch failure, stale replies, external changes, and rollover. The real binary-to-Neovim RPC path is fixture-tested. Lazy Claude lifecycle and Herdr launch use a simulated API; no real Claude session or startup approval was exercised. | User-requested extension | Saved-tour release implemented; interactive focus/startup remains manual acceptance |
 | **Release size/startup (2026-11-15):** Linux x86_64 default features, optimized/stripped binary: 63,751,880 bytes (60.8 MiB), dynamically linked to glibc/ALSA. First `--version`: 8.16 ms; median of 10 subsequent new-process launches: 2.73 ms. Fresh synthetic profile creation/list: 52.19 ms; existing synthetic profile open/list median: 11.18 ms (10 launches). Warm filesystem cache, no cache eviction; not a disk-cold benchmark. Host glibc 2.39; release CI targets 2.35 on Ubuntu 22.04 for x86_64/aarch64. Hosted releases have not been run or published. | R8 | Phase 6 measured |
 
 ---
