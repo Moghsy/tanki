@@ -144,7 +144,7 @@ The existing progress patch still exactly represents the vendor diff.
 
 ### AnkiConnect verification
 
-The adapter supports 32 actions (the exact list is returned by `apiReflect`).
+The adapter supports 33 actions, including `createModel` for normal (non-cloze) note types (the exact list is returned by `apiReflect`).
 It serves serialized requests through the collection actor, with v2/v4 bare
 success responses and v5/v6 envelopes. Errors always have `result`/`error`,
 including old protocol versions. Each nested `multi` request uses its own

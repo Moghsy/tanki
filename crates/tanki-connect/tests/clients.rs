@@ -332,3 +332,50 @@ fn auth_cors_preflight_and_shutdown() {
     });
     actor.close().unwrap();
 }
+
+#[test]
+fn create_model_builds_a_normal_note_type_and_refuses_duplicates() {
+    with_server(|addr, _| {
+        let params = json!({
+            "modelName": "Plugin Test Type",
+            "inOrderFields": ["Prompt", "Answer", "Extra"],
+            "cardTemplates": [{"Name": "Forward", "Front": "{{Prompt}}",
+                               "Back": "{{FrontSide}}<hr id=answer>{{Answer}}"}],
+            "css": ".card { color: red; }"
+        });
+        let created = result(addr, "createModel", params.clone());
+        assert_eq!(created["name"], "Plugin Test Type");
+        assert_eq!(
+            result(
+                addr,
+                "modelFieldNames",
+                json!({"modelName": "Plugin Test Type"})
+            ),
+            json!(["Prompt", "Answer", "Extra"])
+        );
+        // A note can use it straight away.
+        let added = result(
+            addr,
+            "addNote",
+            json!({"note": {"deckName": "Default", "modelName": "Plugin Test Type",
+                            "fields": {"Prompt": "p", "Answer": "a", "Extra": "e"}}}),
+        );
+        assert!(added.as_i64().is_some());
+        // Same name again, a cloze request and an invalid template are errors.
+        for bad in [
+            params.clone(),
+            json!({"modelName": "C", "isCloze": true, "inOrderFields": ["a"],
+                   "cardTemplates": [{"Name":"c","Front":"{{a}}","Back":"{{a}}"}]}),
+            json!({"modelName": "Broken", "inOrderFields": ["a"],
+                   "cardTemplates": [{"Name":"c","Front":"{{missing}}","Back":"x"}]}),
+        ] {
+            let response = call(addr, v6("createModel", bad));
+            assert!(!response["error"].is_null(), "{response}");
+        }
+        let names = result(addr, "modelNames", json!({}));
+        assert!(
+            !names.as_array().unwrap().iter().any(|n| n == "Broken"),
+            "{names}"
+        );
+    });
+}

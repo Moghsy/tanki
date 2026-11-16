@@ -35,10 +35,13 @@ Implementation notes for Phase 4:
   `CodeTourSettings`, `QueuedCard::code_tour`, the note-type installer, the
   `tanki tour` CLI, the Alt+G picker and the Shift+O/Ctrl+O tour wiring.
   Shift+O is now `plugin-actions` and Ctrl+O is `release-hold`.
-- Dropped for now: creating or attaching tours from the command line or add form.
-  They need `createModel`, `findNotes` and `updateNoteFields` in the AnkiConnect
-  subset; until then add a `CodeTour` field to a note type and paste the
-  reference.
+- The Alt+G picker and `tanki tour add/attach/check` are gone. Card creation
+  moved to the plugin's own `install-note-type` and `add` commands, which use
+  tanki's AnkiConnect endpoint. That needed one new standard action,
+  `createModel` (normal, non-cloze note types; refuses an existing name; removes a
+  half-built type if a template is rejected). `findNotes`, `updateNoteFields` and
+  `addNote` were already in the subset. A plugin therefore never opens the
+  collection.
 - The plugin cannot ask which editor to use. With several Neovim editors it
   reports an error unless `editor` is set or `open --pane` is used.
 - The `open` action only works for the card whose answer was revealed last,

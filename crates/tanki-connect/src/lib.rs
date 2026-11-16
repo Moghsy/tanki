@@ -11,6 +11,7 @@ const ACTIONS: &[&str] = &[
     "modelNamesAndIds",
     "modelFieldNames",
     "modelFieldsOnTemplates",
+    "createModel",
     "findNotes",
     "findCards",
     "notesInfo",
@@ -156,6 +157,130 @@ fn connect(backend: &dyn ConnectBackend, command: connect::ConnectCommand) -> Ap
         _ => Err("unexpected core response".into()),
     }
 }
+fn manage_notetype(
+    backend: &dyn ConnectBackend,
+    command: tanki_core::NotetypeCommand,
+) -> std::result::Result<tanki_core::NotetypeResponse, String> {
+    match execute(backend, Command::Manage(ManageCommand::Notetypes(command)))? {
+        Response::Manage(ManageResponse::Notetypes(r)) => Ok(r),
+        _ => Err("unexpected core response".into()),
+    }
+}
+
+/// AnkiConnect `createModel` for normal (non-cloze) note types: fields in
+/// order, one or more card templates, optional CSS. An existing name is refused,
+/// as AnkiConnect does. This is a schema change, which needs a full sync.
+fn create_model(backend: &dyn ConnectBackend, p: &Value) -> ApiResult {
+    use tanki_core::notetypes::{NotetypeEdit, StockKind, TemplateDetail};
+    use tanki_core::NotetypeCommand::{AddStock, Edit};
+    let name = text(p, "modelName")?.trim().to_owned();
+    if name.is_empty() {
+        return Err("modelName is empty".into());
+    }
+    if p["isCloze"].as_bool().unwrap_or(false) {
+        return Err("cloze models are not supported by createModel".into());
+    }
+    let fields: Vec<String> =
+        serde_json::from_value(p["inOrderFields"].clone()).map_err(|_| "invalid inOrderFields")?;
+    let templates: Vec<Value> =
+        serde_json::from_value(p["cardTemplates"].clone()).map_err(|_| "invalid cardTemplates")?;
+    if fields.is_empty() || templates.is_empty() {
+        return Err("a model needs at least one field and one card template".into());
+    }
+    let EditResponse::Notetypes(existing) = notes(backend, NoteCommand::Notetypes)? else {
+        unreachable!()
+    };
+    if existing.iter().any(|m| m.name == name) {
+        return Err("Model name already exists".into());
+    }
+    let tanki_core::NotetypeResponse::Added { id, .. } = manage_notetype(
+        backend,
+        AddStock {
+            kind: StockKind::Basic,
+            name: Some(name.clone()),
+        },
+    )?
+    else {
+        return Err("unexpected core response".into());
+    };
+    // Stock Basic has Front/Back and one card type; reshape it to the request.
+    let mut edits = Vec::new();
+    for (i, field) in fields.iter().enumerate() {
+        edits.push(if i < 2 {
+            NotetypeEdit::RenameField {
+                index: i,
+                name: field.clone(),
+            }
+        } else {
+            NotetypeEdit::AddField {
+                name: field.clone(),
+            }
+        });
+    }
+    if fields.len() == 1 {
+        edits.push(NotetypeEdit::DeleteField { index: 1 });
+    }
+    for (i, template) in templates.iter().enumerate() {
+        let get = |key: &str| template[key].as_str().unwrap_or_default().to_owned();
+        let tname = get("Name");
+        if i == 0 {
+            edits.push(NotetypeEdit::RenameTemplate {
+                index: 0,
+                name: tname,
+            });
+        } else {
+            edits.push(NotetypeEdit::AddTemplate { name: tname });
+        }
+        edits.push(NotetypeEdit::SetTemplate {
+            index: i,
+            template: TemplateDetail {
+                ord: None,
+                name: String::new(),
+                question: get("Front"),
+                answer: get("Back"),
+                browser_question: String::new(),
+                browser_answer: String::new(),
+                browser_font_name: String::new(),
+                browser_font_size: 0,
+                target_deck_id: None,
+            },
+        });
+    }
+    if let Some(css) = p["css"].as_str() {
+        edits.push(NotetypeEdit::SetCss(css.to_owned()));
+    }
+    let outcome = manage_notetype(
+        backend,
+        Edit {
+            id,
+            edits,
+            confirmed: true,
+        },
+    );
+    match outcome {
+        Ok(tanki_core::NotetypeResponse::Saved { notetype, .. }) => {
+            Ok(json!({"id": notetype.id, "name": notetype.name}))
+        }
+        other => {
+            // Leave nothing half-built behind.
+            let _ = manage_notetype(
+                backend,
+                tanki_core::NotetypeCommand::Delete {
+                    id,
+                    confirmed: true,
+                },
+            );
+            Err(match other {
+                Ok(tanki_core::NotetypeResponse::Rejected(problem)) => {
+                    format!("template rejected: {problem:?}")
+                }
+                Ok(_) => "unexpected core response".into(),
+                Err(e) => e,
+            })
+        }
+    }
+}
+
 fn model(backend: &dyn ConnectBackend, name: &str) -> std::result::Result<NotetypeInfo, String> {
     let EditResponse::Notetypes(models) = notes(backend, NoteCommand::Notetypes)? else {
         unreachable!()
@@ -616,6 +741,7 @@ fn action(backend: &dyn ConnectBackend, action: &str, p: &Value) -> ApiResult {
                 }
             }
         }
+        "createModel" => create_model(backend, p)?,
         "findNotes" | "findCards" | "guiBrowse" => {
             let Response::Edit(EditResponse::Ids(found)) = execute(
                 backend,
