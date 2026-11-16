@@ -1,14 +1,28 @@
 # tanki plugins: design and implementation plan
 
-Status: **Phases 2, 3 and 4 done.** Phase 2: `crates/tanki-plugin` (manifest, protocol,
+Status: **Phases 2-5 done** (manual terminal acceptance still open). Phase 2: `crates/tanki-plugin` (manifest, protocol,
 host, registry; 17 tests with a scripted fake plugin). Phase 3: TUI hooks and
-generic hold (below). Phase 4: code-tour moved out (below). Phase 5: docs and acceptance.
+generic hold (below). Phase 4: code-tour moved out (below). Phase 5: docs and acceptance (below).
 Code-tour (Neovim) is the first plugin; today it is still built into tanki and
 will migrate in Phase 4.
 
 Decisions taken: code-tour plugin in Rust; the add/edit-form picker (Alt+G) is
 deferred; no "refresh stale sections" action yet. Claude stays lazy and the
 Neovim plugin needs no new patch.
+
+Acceptance (Phase 5): `crates/tanki-plugin/tests/code_tour_plugin.rs` runs the
+real host against the real `tanki-code-tour` binary and a fake `code-tour` CLI
+(ignored by default):
+
+```sh
+TANKI_CODE_TOUR_REPO=/path/to/tanki-code-tour TANKI_CODE_TOUR_BIN=/path/to/tanki-code-tour/binary \
+  python3 scripts/cargo-bounded.py test -p tanki-plugin --test code_tour_plugin -- --ignored
+```
+
+It checks the manifest-digest grant, the handshake, field filtering (an
+undeclared field is never sent), the hold and status events, and the `saved
+open` call. A manual pass with a real Herdr, Neovim and Claude session remains
+the user's terminal check; tests never start a real model session.
 
 Implementation notes for Phase 4:
 

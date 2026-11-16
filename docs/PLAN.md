@@ -773,7 +773,7 @@ Priority:
 3. [x] **Custom scheduling JS**: QuickJS with protobuf-JSON parity, async jobs, context/custom-data support, resource limits and failure warnings. Matters only for collections whose custom scheduling script is non-empty (deck options → Advanced); the user checks their own profile (rule 1).
 
 4. [x] **Neovim saved code-tour cards** (user requested, 2026-11-15): typed note references, held review, Herdr reader launch and lazy Claude connection. **Moved out of tanki on 2026-11-16 into the standalone `tanki-code-tour` plugin** (sibling repository); tanki keeps only the generic plugin host. The CLI `tour add/attach/check/install-note-type` commands and the Alt+G picker were dropped (AnkiConnect lacks `createModel`/`findNotes`/`updateNoteFields`).
-5. [ ] **Plugins** (user requested, 2026-11-16): out-of-process plugins with a closed hook catalogue and user-granted manifests; code-tour becomes the first plugin. Phases 2-4 done (host crate, TUI hooks and hold, code-tour migrated to the standalone `tanki-code-tour` repo); manual terminal acceptance and docs polish pending. See `docs/implementation/plugins.md`.
+5. [x] **Plugins** (user requested, 2026-11-16): out-of-process plugins with a closed hook catalogue and user-granted manifests; code-tour becomes the first plugin. Phases 2-4 done (host crate, TUI hooks and hold, code-tour migrated to the standalone `tanki-code-tour` repo); the real-terminal Herdr/Neovim/Claude check is manual. See `docs/implementation/plugins.md`.
 
 Optional (low value in a terminal; existing paths cover them):
 
