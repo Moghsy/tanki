@@ -257,7 +257,6 @@ impl App<'_> {
 
     pub(crate) fn run_add_intent(&mut self, intent: AddIntent) {
         match intent {
-            AddIntent::PickCodeTour => self.pick_code_tour(),
             AddIntent::None => {}
             AddIntent::Close => self.pop_layer(),
             AddIntent::Changed(changes) => {

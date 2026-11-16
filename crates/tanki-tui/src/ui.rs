@@ -735,7 +735,7 @@ impl App<'_> {
         let Some(card) = r.card() else {
             return;
         };
-        if let Some(status) = self.tour_status() {
+        if let Some(status) = self.hold_status() {
             let status: String = status.chars().filter(|c| !c.is_control()).collect();
             buf.set_stringn(
                 bar.x + 1,
@@ -746,7 +746,7 @@ impl App<'_> {
             );
             let text = format!(
                 "{} Return to card · rating paused",
-                self.keymap.hint(&scopes, Action::ResumeCodeTour)
+                self.keymap.hint(&scopes, Action::ReleaseHold)
             );
             buf.set_stringn(
                 bar.x + 1,
@@ -756,24 +756,6 @@ impl App<'_> {
                 Style::default().fg(Color::Cyan),
             );
             return;
-        }
-        if r.phase() == Phase::Answer && card.queued.code_tour.is_some() {
-            let text = match &card.queued.code_tour {
-                Some(tanki_core::code_tour::Attachment::Invalid(_)) => {
-                    "Invalid CodeTour reference".to_string()
-                }
-                _ => format!(
-                    "{} Open code-tour",
-                    self.keymap.hint(&scopes, Action::OpenCodeTour)
-                ),
-            };
-            buf.set_stringn(
-                bar.x + 1,
-                bar.y,
-                text,
-                bar.width.saturating_sub(15) as usize,
-                Style::default().fg(Color::Cyan),
-            );
         }
         let more = format!("More {}", self.keymap.hint(&scopes, Action::More));
         buf.set_string(

@@ -476,191 +476,9 @@ fn browser_escape_hatch_opens_the_active_side_and_reports_opener_errors() {
     std::fs::remove_file(opened.borrow().as_ref().unwrap()).unwrap();
 }
 
-fn tour_config(a: &mut App<'_>, root: &Path) {
-    let path = root.join("config.toml");
-    std::fs::write(&path, "[code_tour]\nenabled = true\n").unwrap();
-    a.set_config(Some(path));
-}
-#[test]
-fn code_tour_open_return_rate_and_late_result_safety() {
-    use crate::code_tour::Job;
-    use serde_json::json;
-    let mut linked = card(1, "Q", "A");
-    linked.queued.code_tour = Some(tanki_core::code_tour::Attachment::Saved(
-        tanki_core::code_tour::CodeTourRef::from_id("0123456789abcdef0123456789abcdef").unwrap(),
-    ));
-    let b = FakeBackend::new(vec![linked]);
-    let now = t0();
-    let mut a = app(&b, Start::Review, now);
-    let dir = tempfile::tempdir().unwrap();
-    tour_config(&mut a, dir.path());
-    let (tx, rx) = std::sync::mpsc::channel();
-    let mut rx = Some(rx);
-    a.tour_launcher = Box::new(move |_, _, editor| {
-        if editor.is_none() {
-            Job::ready(Ok(
-                json!([{"address":"/tmp/editor", "instance_id":"one", "cwd":"/tmp"}]),
-            ))
-        } else {
-            let rx = rx.take().unwrap();
-            Job::spawn(move |_| rx.recv().unwrap())
-        }
-    });
-    a.dispatch(Action::OpenCodeTour);
-    assert!(!a.tour_holding());
-    a.dispatch(Action::ShowAnswerOrGood);
-    a.dispatch(Action::OpenCodeTour);
-    a.handle(AppEvent::Tick, now); // discover editor, then open asynchronously
-    assert!(a.tour_holding());
-    snapshot("code_tour_opening", &mut a);
-    a.dispatch(Action::Good);
-    a.dispatch(Action::DeckList);
-    a.dispatch(Action::Undo);
-    assert!(b.state.borrow().answered.is_empty());
-    assert!(a.tour_holding());
-    a.dispatch(Action::ResumeCodeTour);
-    assert!(!a.tour_holding());
-    tx.send(Ok(json!({"id":"late","opened":1}))).unwrap();
-    a.handle(AppEvent::Tick, now.plus_millis(1000));
-    assert!(!a.tour_holding());
-    a.dispatch(Action::Good);
-    assert_eq!(b.state.borrow().answered.len(), 1);
-}
-#[test]
-fn code_tour_failure_and_success_states() {
-    use crate::code_tour::Job;
-    use serde_json::json;
-    let mut linked = card(1, "Q", "A");
-    linked.queued.code_tour = Some(tanki_core::code_tour::Attachment::Saved(
-        tanki_core::code_tour::CodeTourRef::from_id("0123456789abcdef0123456789abcdef").unwrap(),
-    ));
-    let b = FakeBackend::new(vec![linked]);
-    let now = t0();
-    let mut a = app(&b, Start::Review, now);
-    let dir = tempfile::tempdir().unwrap();
-    tour_config(&mut a, dir.path());
-    a.dispatch(Action::ShowAnswerOrGood);
-    a.tour_launcher = Box::new(|_, _, _| Job::ready(Err("missing plugin".into())));
-    a.dispatch(Action::OpenCodeTour);
-    a.handle(AppEvent::Tick, now);
-    assert!(!a.tour_holding());
-    snapshot("code_tour_failure", &mut a);
-    a.tour_launcher = Box::new(|_, _, editor| {
-        Job::ready(Ok(if editor.is_none() {
-            json!([{"address":"/tmp/editor","instance_id":"one"}])
-        } else {
-            json!({"title":"Scheduling", "opened":1, "counts":{"ready":1,"unavailable":1}, "issues":[], "focus_error":"Switch to Neovim manually"})
-        }))
-    });
-    a.dispatch(Action::OpenCodeTour);
-    a.handle(AppEvent::Tick, now);
-    a.handle(AppEvent::Tick, now);
-    assert!(a.tour_holding());
-    snapshot("code_tour_active", &mut a);
-    a.dispatch(Action::Good);
-    assert!(b.state.borrow().answered.is_empty());
-    a.handle(
-        AppEvent::Changes(tanki_core::OpChanges {
-            note: true,
-            ..Default::default()
-        }),
-        now,
-    );
-    a.dispatch(Action::ResumeCodeTour);
-    assert!(!a.tour_holding());
-}
-
-#[test]
-fn code_tour_ambiguous_editor_picker_remembers_only_the_live_instance() {
-    use crate::code_tour::Job;
-    use serde_json::json;
-    let mut linked = card(1, "Q", "A");
-    linked.queued.code_tour = Some(tanki_core::code_tour::Attachment::Saved(
-        tanki_core::code_tour::CodeTourRef::from_id("0123456789abcdef0123456789abcdef").unwrap(),
-    ));
-    let b = FakeBackend::new(vec![linked]);
-    let now = t0();
-    let mut a = app(&b, Start::Review, now);
-    let dir = tempfile::tempdir().unwrap();
-    tour_config(&mut a, dir.path());
-    a.tour_launcher = Box::new(|_, _, editor| {
-        Job::ready(Ok(if editor.is_none() {
-            json!([{"address":"/tmp/one","instance_id":"one"}, {"address":"/tmp/two","instance_id":"two"}])
-        } else {
-            json!({"title":"Tour","opened":1,"issues":[],"counts":{"ready":1}})
-        }))
-    });
-    a.dispatch(Action::ShowAnswerOrGood);
-    a.dispatch(Action::OpenCodeTour);
-    a.handle(AppEvent::Tick, now);
-    assert!(matches!(&a.overlay, Some(Overlay::Choice { options, .. }) if options.len() == 2));
-    a.overlay = None;
-    a.chosen(ChoiceValue::TourEditor(1));
-    a.handle(AppEvent::Tick, now);
-    assert_eq!(a.tour_editor.as_ref().unwrap()["instance_id"], "two");
-    a.dispatch(Action::ResumeCodeTour);
-    a.dispatch(Action::OpenCodeTour);
-    a.handle(AppEvent::Tick, now);
-    assert!(a.overlay.is_none()); // same live instance automatically selected
-    a.dispatch(Action::ResumeCodeTour);
-    a.tour_editor.as_mut().unwrap()["instance_id"] = json!("replaced");
-    a.dispatch(Action::OpenCodeTour);
-    a.handle(AppEvent::Tick, now);
-    assert!(matches!(&a.overlay, Some(Overlay::Choice { .. })));
-    a.overlay = None;
-    a.chosen(ChoiceValue::TourCancel);
-    assert!(!a.tour_holding());
-}
-
-#[test]
-fn code_tour_starts_reader_when_no_editor_is_running() {
-    use crate::code_tour::Job;
-    use serde_json::json;
-    let mut linked = card(1, "Q", "A");
-    linked.queued.code_tour = Some(tanki_core::code_tour::Attachment::Saved(
-        tanki_core::code_tour::CodeTourRef::from_id("0123456789abcdef0123456789abcdef").unwrap(),
-    ));
-    let b = FakeBackend::new(vec![linked]);
-    let now = t0();
-    let mut a = app(&b, Start::Review, now);
-    let dir = tempfile::tempdir().unwrap();
-    tour_config(&mut a, dir.path());
-    a.tour_launcher = Box::new(|_, _, editor| {
-        Job::ready(Ok(if let Some(editor) = editor {
-            assert_eq!(editor["launch"], true);
-            json!({"title":"New reader", "opened":1, "counts":{"ready":1}, "issues":[], "editor":{"address":"/tmp/new-reader","instance_id":"new"}})
-        } else {
-            json!([])
-        }))
-    });
-    a.dispatch(Action::ShowAnswerOrGood);
-    a.handle(
-        AppEvent::Key(
-            KeyEvent::new(KeyCode::Char('O'), KeyModifiers::SHIFT),
-            now.at,
-        ),
-        now,
-    );
-    a.handle(AppEvent::Tick, now);
-    assert_eq!(a.tour_status(), Some("Starting Neovim in Herdr…"));
-    a.handle(AppEvent::Tick, now);
-    assert!(a.tour_holding());
-    assert_eq!(a.tour_editor.as_ref().unwrap()["instance_id"], "new");
-    a.handle(
-        AppEvent::Key(
-            KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL),
-            now.at,
-        ),
-        now,
-    );
-    assert!(!a.tour_holding());
-    assert!(b.state.borrow().answered.is_empty());
-}
-
 // ---- plugin hooks and generic hold ----------------------------------------
 
 mod plugin_port {
-    use super::*;
     use crate::plugins::PluginPort;
     use std::{cell::RefCell, rc::Rc, time::Instant};
     use tanki_plugin::{Event, EventKind, Hook, HookContext};
@@ -742,15 +560,15 @@ fn plugin_hold_blocks_rating_and_ctrl_o_force_releases() {
     a.dispatch(Action::ShowAnswerOrGood);
     shared.borrow_mut().on_hook = vec![plugin_port::event(HoldReview("opening".into()))];
     a.handle(AppEvent::Tick, now);
-    assert!(a.tour_holding());
-    assert_eq!(a.tour_status(), Some("opening"));
+    assert!(a.holding());
+    assert_eq!(a.hold_status(), Some("opening"));
     shared.borrow_mut().pending = vec![plugin_port::event(Status("reading".into()))];
     a.handle(AppEvent::Tick, now);
-    assert_eq!(a.tour_status(), Some("reading"));
+    assert_eq!(a.hold_status(), Some("reading"));
     a.dispatch(Action::Good);
     assert!(b.state.borrow().answered.is_empty(), "rating is blocked");
-    a.dispatch(Action::ResumeCodeTour);
-    assert!(!a.tour_holding() && a.tour_status().is_none());
+    a.dispatch(Action::ReleaseHold);
+    assert!(!a.holding() && a.hold_status().is_none());
     // The hook does not fire again for the same card after returning.
     a.handle(AppEvent::Tick, now.plus_millis(1000));
     assert_eq!(shared.borrow().seen.len(), 1);
@@ -777,10 +595,10 @@ fn plugin_release_event_and_dropped_plugin_end_the_hold() {
         a.dispatch(Action::ShowAnswerOrGood);
         shared.borrow_mut().on_hook = vec![plugin_port::event(HoldReview("x".into()))];
         a.handle(AppEvent::Tick, now);
-        assert!(a.tour_holding());
+        assert!(a.holding());
         shared.borrow_mut().pending = ending.into_iter().map(plugin_port::event).collect();
         a.handle(AppEvent::Tick, now);
-        assert!(!a.tour_holding());
+        assert!(!a.holding());
     }
 }
 
@@ -792,13 +610,13 @@ fn plugin_cannot_hold_the_question_side_or_a_second_time() {
     let (mut a, shared) = plugin_app(&b, now);
     shared.borrow_mut().pending = vec![plugin_port::event(HoldReview("early".into()))];
     a.handle(AppEvent::Tick, now);
-    assert!(!a.tour_holding(), "no hold before the answer is revealed");
+    assert!(!a.holding(), "no hold before the answer is revealed");
     a.dispatch(Action::ShowAnswerOrGood);
     shared.borrow_mut().on_hook = vec![plugin_port::event(HoldReview("first".into()))];
     a.handle(AppEvent::Tick, now);
     shared.borrow_mut().pending = vec![plugin_port::event(HoldReview("second".into()))];
     a.handle(AppEvent::Tick, now);
-    assert_eq!(a.tour_status(), Some("first"));
+    assert_eq!(a.hold_status(), Some("first"));
 }
 
 #[test]

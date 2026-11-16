@@ -31,7 +31,6 @@ pub const MESSAGE_SECS: u64 = 5;
 /// The congrats screen re-polls this often (`CongratsPage.svelte`).
 pub const CONGRATS_POLL_SECS: u64 = 60;
 
-mod code_tour;
 mod plugins;
 
 pub type Opener = Box<dyn Fn(&Path) -> std::io::Result<()>>;
@@ -267,11 +266,6 @@ pub enum ChoiceValue {
     TimeboxFinish,
     /// A backup from the list offered by `restore-backup` (index).
     Backup(usize),
-    TourEditor(usize),
-    TourCancel,
-    TourAttach(usize),
-    TourMore,
-    TourPickerCancel,
     /// An entry of the plugin action list (index).
     PluginAction(usize),
     Cancel,
@@ -362,10 +356,6 @@ pub struct App<'a> {
     /// Add / edit and browser screens over `screen`, topmost last.
     pub layers: Vec<Layer>,
     pub(crate) editor: EditorRunner,
-    tour: Option<code_tour::TourActivity>,
-    tour_launcher: code_tour::TourLauncher,
-    tour_picker: Option<code_tour::TourPicker>,
-    tour_editor: Option<serde_json::Value>,
     plugins: Option<Box<dyn crate::plugins::PluginPort>>,
     plugin_hold: Option<plugins::PluginHold>,
     plugin_action_list: Vec<(String, String, String)>,
@@ -414,14 +404,10 @@ impl<'a> App<'a> {
             layers: Vec::new(),
             editor: Box::new(|_, _| Err(std::io::Error::other("No terminal to run the editor in"))),
             flow_options: FlowOptions::default(),
-            tour: None,
-            tour_picker: None,
-            tour_editor: None,
             plugins: None,
             plugin_hold: None,
             plugin_action_list: Vec::new(),
             reveal_fired: None,
-            tour_launcher: code_tour::launcher(),
         };
         app.next_day_at = backend::sched_timing(&app.backend)
             .ok()
@@ -443,7 +429,9 @@ impl<'a> App<'a> {
         self.keymap = keymap;
     }
     pub fn shutdown(&mut self) {
-        self.tour = None;
+        if let Some(plugins) = self.plugins.as_mut() {
+            plugins.shutdown();
+        }
         self.cancel_job();
         self.services.audio.shutdown();
         self.clear_images();
@@ -734,9 +722,7 @@ impl<'a> App<'a> {
 
     fn on_tick(&mut self) {
         let now = self.now;
-        self.poll_code_tour();
         self.poll_plugins();
-        self.poll_tour_picker();
         self.poll_job();
         self.tick_layers();
         if let Screen::Review(_) = self.screen {
@@ -817,7 +803,7 @@ impl<'a> App<'a> {
     }
 
     fn on_paste(&mut self, text: &str) {
-        if self.tour_holding() {
+        if self.holding() {
             return;
         }
         if self.sync_ui.is_visible() || self.package_ui.is_some() {
@@ -843,7 +829,7 @@ impl<'a> App<'a> {
     }
 
     fn on_mouse(&mut self, mouse: MouseEvent) {
-        if self.tour_holding() {
+        if self.holding() {
             return;
         }
         if self.overlay.is_some()
@@ -938,7 +924,7 @@ impl<'a> App<'a> {
         let Some(chord) = Chord::from_event(&key) else {
             return;
         };
-        if self.tour_holding() && self.overlay.is_none() {
+        if self.holding() && self.overlay.is_none() {
             if let Some(action) = self.keymap.lookup(&[Scope::Review, Scope::Global], &chord) {
                 self.dispatch(action);
             }
@@ -1092,14 +1078,10 @@ impl<'a> App<'a> {
 
     /// Runs `action` on the current screen.
     pub fn dispatch(&mut self, action: Action) {
-        if self.tour_holding()
+        if self.holding()
             && !matches!(
                 action,
-                Action::ResumeCodeTour
-                    | Action::Quit
-                    | Action::Help
-                    | Action::Palette
-                    | Action::About
+                Action::ReleaseHold | Action::Quit | Action::Help | Action::Palette | Action::About
             )
         {
             return;
@@ -1121,8 +1103,7 @@ impl<'a> App<'a> {
         }
         match action {
             Action::Quit => self.quit = true,
-            Action::OpenCodeTour => self.open_code_tour(),
-            Action::ResumeCodeTour => self.resume_code_tour(),
+            Action::ReleaseHold => self.release_hold(),
             Action::PluginActions => self.plugin_actions(),
             Action::AddNote => self.open_add(),
             Action::Browse => {
@@ -2077,14 +2058,7 @@ impl<'a> App<'a> {
                 self.go_decks();
             }
             ChoiceValue::Backup(index) => self.restore_chosen(index),
-            ChoiceValue::TourEditor(index) => self.choose_tour_editor(index),
-            ChoiceValue::TourCancel => self.resume_code_tour(),
-            ChoiceValue::TourAttach(index) => self.attach_picked_tour(index),
-            ChoiceValue::TourMore => self.more_tours(),
             ChoiceValue::PluginAction(index) => self.run_plugin_action(index),
-            ChoiceValue::TourPickerCancel => {
-                self.tour_picker = None;
-            }
             ChoiceValue::Cancel => {}
         }
     }

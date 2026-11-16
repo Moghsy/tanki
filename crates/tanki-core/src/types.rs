@@ -110,9 +110,6 @@ pub enum QueueKind {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct QueuedCard {
-    /// Optional saved code-tour in the note's CodeTour field.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub code_tour: Option<crate::code_tour::Attachment>,
     /// Raw note fields by name, for plugins. Never serialized; a plugin only
     /// receives the fields its manifest declares.
     #[serde(default, skip_serializing)]

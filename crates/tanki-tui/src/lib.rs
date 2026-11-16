@@ -9,7 +9,6 @@ pub mod app;
 pub mod backend;
 pub mod browser_ui;
 pub mod charts;
-pub mod code_tour;
 pub mod completion;
 pub mod deck_options_ui;
 pub mod deck_tools_ui;

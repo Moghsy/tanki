@@ -680,7 +680,7 @@ fn congrats_message_units() {
 }
 
 #[test]
-fn code_tour_hold_blocks_timers_and_subtracts_only_external_time() {
+fn hold_hold_blocks_timers_and_subtracts_only_external_time() {
     let b = FakeBackend::new(vec![card(1, "Q", "A"), card(2, "Q2", "A2")]);
     b.with(|s| {
         s.config.show_timer = true;
@@ -713,7 +713,7 @@ fn code_tour_hold_blocks_timers_and_subtracts_only_external_time() {
     );
 }
 #[test]
-fn code_tour_defers_external_changes_and_refreshes_before_rating() {
+fn hold_defers_external_changes_and_refreshes_before_rating() {
     let b = FakeBackend::new(vec![card(1, "Q", "A")]);
     let now = t0();
     let (mut r, _) = started(&b, now);
@@ -739,7 +739,7 @@ fn code_tour_defers_external_changes_and_refreshes_before_rating() {
 }
 
 #[test]
-fn code_tour_failed_refresh_cannot_answer_cached_states() {
+fn hold_failed_refresh_cannot_answer_cached_states() {
     let b = FakeBackend::new(vec![card(1, "Q", "A")]);
     let now = t0();
     let (mut r, _) = started(&b, now);
@@ -761,7 +761,7 @@ fn code_tour_failed_refresh_cannot_answer_cached_states() {
 }
 
 #[test]
-fn code_tour_hold_does_not_carry_into_the_next_timebox() {
+fn hold_hold_does_not_carry_into_the_next_timebox() {
     let b = FakeBackend::new(vec![card(1, "Q", "A"), card(2, "Q2", "A2")]);
     b.with(|s| s.config.timebox_secs = 30);
     let now = t0();
@@ -777,7 +777,7 @@ fn code_tour_hold_does_not_carry_into_the_next_timebox() {
     assert!(fx.iter().any(|e| matches!(e, Effect::Timebox { .. })));
 }
 #[test]
-fn code_tour_day_rollover_waits_until_return_then_reveals_question() {
+fn hold_day_rollover_waits_until_return_then_reveals_question() {
     let now = t0();
     let b = FakeBackend::new(vec![card(1, "Q", "A")]);
     b.with(|s| s.timing.next_day_at = now.wall_ms / 1000 + 1);

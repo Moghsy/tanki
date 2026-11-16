@@ -44,7 +44,6 @@ const LABEL_LIMIT: usize = 30;
 /// What only the app can do, returned by [`AddUi::on_key`] / `on_paste`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AddIntent {
-    PickCodeTour,
     None,
     /// Leave the screen (nothing unsaved, or the user chose to discard).
     Close,
@@ -98,7 +97,6 @@ pub const KEYS: &[(&str, &str)] = &[
     ),
     ("Alt+F / Alt+V", "attach file or URL / clipboard image"),
     ("Alt+X / Alt+Shift+X", "edit field / note in $EDITOR"),
-    ("Alt+G", "choose a saved code-tour"),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -524,29 +522,6 @@ impl AddUi {
         self.form.deck_id
     }
 
-    pub fn code_tour_context(&self) -> Option<(i64, Option<i64>)> {
-        self.form
-            .notetype
-            .fields
-            .iter()
-            .any(|f| f.name == tanki_core::code_tour::FIELD)
-            .then(|| (self.form.notetype.id, self.edited_note_id()))
-    }
-    pub fn set_code_tour(
-        &mut self,
-        b: &dyn Backend,
-        reference: tanki_core::code_tour::CodeTourRef,
-    ) {
-        if let Some(ord) = self
-            .form
-            .notetype
-            .fields
-            .iter()
-            .position(|f| f.name == tanki_core::code_tour::FIELD)
-        {
-            self.apply_external_field(b, ord, reference.uri());
-        }
-    }
     pub fn field_values(&self) -> Vec<String> {
         self.form.values()
     }
@@ -871,7 +846,6 @@ impl AddUi {
             Some(AddIntent::None)
         };
         match (c, upper) {
-            ('g', _) => Some(AddIntent::PickCodeTour),
             ('b', _) => format(self, EditorCommand::Bold),
             ('i', _) => format(self, EditorCommand::Italic),
             ('u', _) => format(self, EditorCommand::Underline),

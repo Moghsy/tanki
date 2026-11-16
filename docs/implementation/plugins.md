@@ -1,14 +1,34 @@
 # tanki plugins: design and implementation plan
 
-Status: **Phases 2 and 3 done.** Phase 2: `crates/tanki-plugin` (manifest, protocol,
+Status: **Phases 2, 3 and 4 done.** Phase 2: `crates/tanki-plugin` (manifest, protocol,
 host, registry; 17 tests with a scripted fake plugin). Phase 3: TUI hooks and
-generic hold (below). Phases 4-5 pending.
+generic hold (below). Phase 4: code-tour moved out (below). Phase 5: docs and acceptance.
 Code-tour (Neovim) is the first plugin; today it is still built into tanki and
 will migrate in Phase 4.
 
 Decisions taken: code-tour plugin in Rust; the add/edit-form picker (Alt+G) is
 deferred; no "refresh stale sections" action yet. Claude stays lazy and the
 Neovim plugin needs no new patch.
+
+Implementation notes for Phase 4:
+
+- The plugin lives in the sibling repository `tanki-code-tour` (Rust, no tanki
+  crate dependencies). It holds the bridge to the code-tour CLI, the
+  `code-tour://saved/<id>` parser, the `code-tour.nvim` patches, installers and
+  setup docs. Its settings are `[plugins.code-tour.settings]` (unknown keys are
+  an error); Claude stays lazy inside the Neovim reader.
+- tanki lost all code-tour-specific code: `tanki-core::code_tour`,
+  `CodeTourSettings`, `QueuedCard::code_tour`, the note-type installer, the
+  `tanki tour` CLI, the Alt+G picker and the Shift+O/Ctrl+O tour wiring.
+  Shift+O is now `plugin-actions` and Ctrl+O is `release-hold`.
+- Dropped for now: creating or attaching tours from the command line or add form.
+  They need `createModel`, `findNotes` and `updateNoteFields` in the AnkiConnect
+  subset; until then add a `CodeTour` field to a note type and paste the
+  reference.
+- The plugin cannot ask which editor to use. With several Neovim editors it
+  reports an error unless `editor` is set or `open --pane` is used.
+- The `open` action only works for the card whose answer was revealed last,
+  because the host sends note fields with the hook, not with actions.
 
 Implementation notes for Phase 3:
 
@@ -187,10 +207,9 @@ rejected with a message pointing to `[plugins.code-tour]`.
    palette and keymap actions; snapshot and unit tests with a fake registry.
    Gate: generic hold works with a fake plugin.
 4. **Migrate code-tour:** build `plugins/code-tour`, remove the built-in code
-   from core, TUI and CLI, keep the note type. Replace the Alt+G picker with the
-   plugin CLI unless a host `pick_field` capability is agreed.
-5. **Docs and verification:** update `docs/neovim.md`, the neovim plan and
-   PLAN.md; run tests and clippy through `scripts/cargo-bounded.py`; `cargo fmt
+   from core, TUI and CLI, drop the note-type installer and the Alt+G picker (see the
+   Phase 4 notes for why).
+5. **Docs and verification:** update README and PLAN.md; run tests and clippy through `scripts/cargo-bounded.py`; `cargo fmt
    -p` per package; synthetic `/tmp` profiles only. A real Herdr, Neovim and
    Claude pass is a manual terminal check.
 

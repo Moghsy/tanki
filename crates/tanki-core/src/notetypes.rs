@@ -36,8 +36,6 @@ pub use draft::{
 /// sync is already pending), so the UI can ask and repeat with true.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NotetypeCommand {
-    /// Install the recommended saved-tour type; never overwrite a user type.
-    InstallCodeTour,
     /// All note types sorted by name, with use counts -> `List`.
     List,
     /// -> `StockKinds`.
@@ -199,7 +197,6 @@ impl NotetypeResponse {
 
 pub(crate) fn execute(col: &mut Collection, command: NotetypeCommand) -> Result<NotetypeResponse> {
     Ok(match command {
-        NotetypeCommand::InstallCodeTour => install_code_tour(col)?,
         NotetypeCommand::List => NotetypeResponse::List(list(col)?),
         NotetypeCommand::StockKinds => NotetypeResponse::StockKinds(stock_kinds(col)?),
         NotetypeCommand::Get { id } => NotetypeResponse::Detail(get(col, id)?),
@@ -801,48 +798,4 @@ fn preview(
         card.css = css;
     }
     Ok(TemplatePreview { card, error })
-}
-
-fn install_code_tour(col: &mut Collection) -> Result<NotetypeResponse> {
-    use crate::code_tour::NOTETYPE;
-    if let Some(existing) = list(col)?.into_iter().find(|n| n.name == NOTETYPE) {
-        let nt = get(col, existing.id)?;
-        if nt.kind != NotetypeKind::Normal
-            || nt
-                .fields
-                .iter()
-                .map(|f| f.name.as_str())
-                .collect::<Vec<_>>()
-                != ["Prompt", "Answer", "CodeTour"]
-            || nt.templates.len() != 1
-            || nt.templates[0].question != "{{Prompt}}"
-            || nt.templates[0].answer != "{{FrontSide}}<hr id=answer>{{Answer}}"
-        {
-            return invalid("An incompatible Tanki Code Tour note type exists; it was not changed");
-        }
-        return Ok(NotetypeResponse::Added {
-            id: nt.id,
-            changes: OpChanges::default(),
-        });
-    }
-    let mut json = stock_json(col, StockKind::Basic)?;
-    json["name"] = NOTETYPE.into();
-    json["flds"][0]["name"] = "Prompt".into();
-    json["flds"][1]["name"] = "Answer".into();
-    let mut field = json["flds"][1].clone();
-    field["name"] = "CodeTour".into();
-    field["ord"] = 2.into();
-    if let Some(obj) = field.as_object_mut() {
-        obj.remove("id");
-    }
-    json["flds"].as_array_mut().unwrap().push(field);
-    json["tmpls"][0]["qfmt"] = "{{Prompt}}".into();
-    json["tmpls"][0]["afmt"] = "{{FrontSide}}<hr id=answer>{{Answer}}".into();
-    let result = NotetypesService::add_notetype_legacy(
-        col,
-        pb::generic::Json {
-            json: serde_json::to_vec(&json).map_err(|e| CoreError::Other(e.to_string()))?,
-        },
-    )?;
-    Ok(added(result))
 }

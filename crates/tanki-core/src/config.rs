@@ -144,7 +144,6 @@ pub struct Config {
     pub seen_collections: BTreeSet<String>,
     pub editor: EditorSettings,
     pub connect: ConnectSettings,
-    pub code_tour: CodeTourSettings,
     /// User grants for out-of-process plugins, keyed by plugin name.
     pub plugins: BTreeMap<String, PluginConfig>,
 }
@@ -396,38 +395,6 @@ mod tests {
         config.profile_mut("a").sync.url = Some("https://sync.ankiweb.net/".into());
         assert!(config.sync_endpoint("a").is_err());
         assert!(config.sync_endpoint("missing").unwrap().is_none());
-    }
-}
-
-/// Machine-local Neovim bridge settings. Card fields never select executables.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct CodeTourSettings {
-    pub enabled: bool,
-    /// Launch a reader tab in the caller's Herdr session when no editor exists.
-    pub launch_in_herdr: bool,
-    /// Start Claude only on an explicit ask/explain/refresh action.
-    pub lazy_claude: bool,
-    pub command: Vec<String>,
-    pub nvim_appname: String,
-    pub xdg_config_home: Option<PathBuf>,
-    pub xdg_data_home: Option<PathBuf>,
-    pub xdg_state_home: Option<PathBuf>,
-    pub repositories: BTreeMap<String, PathBuf>,
-}
-impl Default for CodeTourSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            launch_in_herdr: true,
-            lazy_claude: true,
-            command: vec!["code-tour".into()],
-            nvim_appname: "nvim".into(),
-            xdg_config_home: None,
-            xdg_data_home: None,
-            xdg_state_home: None,
-            repositories: BTreeMap::new(),
-        }
     }
 }
 

@@ -4,8 +4,8 @@
   │  i                      Card info                                        │
   │  o                      Deck options                                     │
   │  Ctrl+Alt+I             Previous card info                               │
-  │  Shift+O                Open saved code-tour in Neovim                   │
-  │  Ctrl+O                 Return to card from code-tour                    │
+  │  Shift+O                Run a plugin action                              │
+  │  Ctrl+O                 Return to the card from a plugin                 │
   │  Space, Enter           Show answer / answer Good                        │
   │  1                      Answer Again                                     │
   │  2                      Answer Hard                                      │
@@ -32,8 +32,8 @@ Buffer {
         "  │  i                      Card info                                        │  ",
         "  │  o                      Deck options                                     │  ",
         "  │  Ctrl+Alt+I             Previous card info                               │  ",
-        "  │  Shift+O                Open saved code-tour in Neovim                   │  ",
-        "  │  Ctrl+O                 Return to card from code-tour                    │  ",
+        "  │  Shift+O                Run a plugin action                              │  ",
+        "  │  Ctrl+O                 Return to the card from a plugin                 │  ",
         "  │  Space, Enter           Show answer / answer Good                        │  ",
         "  │  1                      Answer Again                                     │  ",
         "  │  2                      Answer Hard                                      │  ",

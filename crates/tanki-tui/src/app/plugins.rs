@@ -1,5 +1,5 @@
 //! Plugin hooks, review holds and actions. The reviewer's single hold is
-//! shared with the built-in tour; `plugin_hold` records who owns it.
+//! owned by a plugin; `plugin_hold` records who.
 use super::*;
 use crate::plugins::PluginPort;
 use tanki_core::config::{plugins_dir, Config};
@@ -11,6 +11,14 @@ pub(super) struct PluginHold {
 }
 
 impl App<'_> {
+    pub(crate) fn holding(&self) -> bool {
+        matches!(&self.screen, Screen::Review(v) if v.reviewer.holding())
+    }
+    /// The plugin's status line while it holds the review.
+    pub(crate) fn hold_status(&self) -> Option<&str> {
+        self.plugin_hold.as_ref().map(|h| h.status.as_str())
+    }
+
     /// Replaces the plugin host; `None` disables plugins. Used by tests.
     pub fn set_plugins(&mut self, port: Option<Box<dyn PluginPort>>) {
         if let Some(old) = self.plugins.as_mut() {
@@ -61,7 +69,7 @@ impl App<'_> {
     /// the screen, so a plugin never opens over an overlay.
     fn fire_reveal_hooks(&mut self) {
         if self.plugins.is_none()
-            || self.tour_holding()
+            || self.holding()
             || self.overlay.is_some()
             || !self.layers.is_empty()
         {
@@ -183,7 +191,7 @@ impl App<'_> {
     }
 
     fn begin_plugin_hold(&mut self, plugin: String, reason: String) {
-        if self.tour_holding() || self.plugin_hold.is_some() {
+        if self.holding() || self.plugin_hold.is_some() {
             return; // One hold at a time; the first owner keeps it.
         }
         let now = self.now;
@@ -203,13 +211,21 @@ impl App<'_> {
         });
     }
 
-    /// Ends a plugin-owned hold and returns to the card, like a tour return.
-    pub(super) fn release_plugin_hold(&mut self) {
-        if self.plugin_hold.take().is_none() {
+    /// Returns to the card. Always works, whatever the plugin is doing.
+    pub(super) fn release_hold(&mut self) {
+        if !self.holding() {
             return;
         }
+        self.plugin_hold = None;
+        self.overlay = None;
         self.with_reviewer(|r, b, now| r.end_hold(b, now));
         self.after_editor();
         self.ignore_keys_before = Some(self.now.at);
+    }
+
+    fn release_plugin_hold(&mut self) {
+        if self.plugin_hold.is_some() {
+            self.release_hold();
+        }
     }
 }

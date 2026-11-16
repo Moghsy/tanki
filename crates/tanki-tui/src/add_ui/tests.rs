@@ -912,26 +912,3 @@ fn tag_completion_uses_the_shared_popup_keys() {
     ui.on_key(&b, key(KeyCode::Tab));
     assert_eq!(ui.form.focus, Focus::Field(0));
 }
-
-#[test]
-fn saved_tour_picker_only_updates_the_named_draft_field() {
-    let b = Fake::new();
-    b.notetypes.borrow_mut().push(notetype(
-        30,
-        "Tour",
-        &["Prompt", "Answer", "CodeTour"],
-        NotetypeKind::Normal,
-    ));
-    let mut ui = AddUi::new_add(&b, 0, "/tmp/media".into()).unwrap();
-    ui.change_notetype(&b, 30);
-    let reference =
-        tanki_core::code_tour::CodeTourRef::from_id("0123456789abcdef0123456789abcdef").unwrap();
-    assert_eq!(
-        ui.on_key(&b, KeyEvent::new(KeyCode::Char('g'), KeyModifiers::ALT)),
-        AddIntent::PickCodeTour
-    );
-    ui.set_code_tour(&b, reference.clone());
-    assert_eq!(ui.field_values(), ["", "", &reference.uri()]);
-    assert!(ui.has_unsaved_input());
-    assert!(b.notes.borrow().is_empty());
-}

@@ -69,14 +69,18 @@ Collection custom scheduling scripts run in QuickJS, including `await`,
 execution limit and a 16 MiB runtime limit. Script failures show a warning
 and leave that card's standard scheduling states unchanged.
 
-## Neovim code-tour cards
+## Plugins
 
-Store an existing saved code-tour in a note's `CodeTour` field. Reveal the
-answer, press Shift+O to open it in Neovim, then Ctrl+O to return and rate.
-`tanki tour` provides setup checks, saved-tour listing, card creation and
-attachment. The add/edit form has an Alt+G tour picker. See
-[Neovim setup and usage](docs/neovim.md) for the companion plugin patch and
-configuration.
+tanki runs optional out-of-process plugins from `$XDG_CONFIG_HOME/tanki/plugins/<name>/`.
+A plugin is an executable plus a `plugin.toml` manifest that declares the hooks,
+capabilities and note fields it wants. It runs only after you enable it in
+`config.toml` and pin the manifest's SHA-256 (`[plugins.<name>]`), so card
+content and later manifest changes can never start or widen a plugin. A plugin
+can react when an answer is revealed, hold the review while you use another tool
+(Ctrl+O always returns), show status and notices, and offer actions (Shift+O).
+See [docs/implementation/plugins.md](docs/implementation/plugins.md).
+
+Saved Neovim code-tour cards are a separate plugin, `tanki-code-tour`.
 
 ## Development
 

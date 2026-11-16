@@ -221,28 +221,22 @@ pub(crate) fn queue(col: &mut Collection, limit: u32, cache: &mut StateCache) ->
             Ok(pb::scheduler::queued_cards::Queue::Review) => QueueKind::Review,
             _ => QueueKind::New,
         };
-        if !field_names.contains_key(&note.notetype_id) {
+        if let std::collections::hash_map::Entry::Vacant(slot) = field_names.entry(note.notetype_id)
+        {
             let nt = NotetypesService::get_notetype(
                 col,
                 pb::notetypes::NotetypeId {
                     ntid: note.notetype_id,
                 },
             )?;
-            field_names.insert(
-                note.notetype_id,
-                nt.fields.iter().map(|f| f.name.clone()).collect(),
-            );
+            slot.insert(nt.fields.iter().map(|f| f.name.clone()).collect());
         }
         let fields: std::collections::BTreeMap<String, String> = field_names[&note.notetype_id]
             .iter()
             .cloned()
             .zip(note.fields.iter().cloned())
             .collect();
-        let code_tour = fields
-            .get(crate::code_tour::FIELD)
-            .and_then(|value| crate::code_tour::parse_field(value));
         cards.push(QueuedCard {
-            code_tour,
             fields,
             id: card.id,
             intervals,

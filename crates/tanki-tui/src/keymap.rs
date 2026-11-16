@@ -152,8 +152,7 @@ actions! {
     DeleteNote = "delete-note", "Delete note...";
     ToggleAutoAdvance = "toggle-auto-advance", "Toggle auto advance";
     ZoomImage = "zoom-image", "Zoom images";
-    OpenCodeTour = "open-code-tour", "Open saved code-tour in Neovim";
-    ResumeCodeTour = "resume-code-tour", "Return to card from code-tour";
+    ReleaseHold = "release-hold", "Return to the card from a plugin";
     PluginActions = "plugin-actions", "Run a plugin action";
     OpenInBrowser = "open-in-browser", "Open card in the web browser";
     ToggleHints = "toggle-hints", "Show / hide hints";
@@ -435,8 +434,8 @@ pub const DEFAULTS: &[(&str, &str, &str)] = &[
     ("overview", "shift+b", "backup-now"),
     ("overview", "shift+r", "restore-backup"),
     // Reviewer (R4 §22.3, reviewer.py `_shortcutKeys`).
-    ("review", "shift+o", "open-code-tour"),
-    ("review", "ctrl+o", "resume-code-tour"),
+    ("review", "shift+o", "plugin-actions"),
+    ("review", "ctrl+o", "release-hold"),
     ("review", "space", "show-answer"),
     ("review", "enter", "show-answer"),
     ("review", "1", "again"),
