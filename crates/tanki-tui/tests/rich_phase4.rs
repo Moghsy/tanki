@@ -235,6 +235,26 @@ fn bitmap_choice_is_saved_and_a_tall_card_scrolls_as_pixels() {
             .any(|c| c.bg == ratatui::style::Color::Rgb(0x33, 0x55, 0x77)),
         "{scrolled:?}"
     );
+    app.dispatch(Action::ShowAnswerOrGood);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let buffer = draw(&mut app);
+        let Screen::Review(view) = &app.screen else {
+            panic!()
+        };
+        let answer_bitmap =
+            view.reviewer.showing_answer()
+                && view.render.as_ref().is_some_and(|render| {
+                    render.card.images.iter().any(|image| {
+                        matches!(image.source, tanki_render::ImageSource::Bitmap { .. })
+                    })
+                });
+        if answer_bitmap && has_pixels(&buffer) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "answer bitmap did not display");
+        std::thread::sleep(Duration::from_millis(10));
+    }
     drop(app);
     let (mut restored, _) = self::app(&actor);
     restored.set_config(Some(config_path));

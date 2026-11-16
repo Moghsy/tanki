@@ -10,6 +10,7 @@ default = []
 blitz = ["tanki-render/blitz"]
 
 [dependencies]
+serde_json.workspace = true
 tanki-connect = { path = "../tanki-connect" }
 tanki-core = { path = "../tanki-core" }
 tanki-render = { path = "../tanki-render" }

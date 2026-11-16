@@ -3,6 +3,7 @@
 mod actor;
 mod backup;
 mod browse_ops;
+pub mod code_tour;
 pub mod config;
 pub mod connect;
 mod custom_scheduling;

@@ -20,7 +20,7 @@
 
 
                  Studied 3 cards in 1 minutes today (20s/card).
-      Enter open · s study · y sync · Space collapse · : commands · ? help
+ Enter open · / find · s study · y sync · Space collapse · : commands · ? help
  fixture │ 7 1 15                                        ♪ on │ ▣ text │ ? help
 
 Buffer {
@@ -48,7 +48,7 @@ Buffer {
         "                                                                                ",
         "                                                                                ",
         "                 Studied 3 cards in 1 minutes today (20s/card).                 ",
-        "      Enter open · s study · y sync · Space collapse · : commands · ? help      ",
+        " Enter open · / find · s study · y sync · Space collapse · : commands · ? help  ",
         " fixture │ 7 1 15                                        ♪ on │ ▣ text │ ? help ",
     ],
     styles: [
@@ -95,8 +95,8 @@ Buffer {
         x: 15, y: 11, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 17, y: 21, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
         x: 63, y: 21, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 6, y: 22, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
-        x: 74, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 1, y: 22, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 78, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: BOLD,
         x: 9, y: 23, fg: Gray, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,
         x: 11, y: 23, fg: LightBlue, bg: Rgb(40, 40, 40), underline: Reset, modifier: NONE,

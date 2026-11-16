@@ -31,6 +31,8 @@ pub const MESSAGE_SECS: u64 = 5;
 /// The congrats screen re-polls this often (`CongratsPage.svelte`).
 pub const CONGRATS_POLL_SECS: u64 = 60;
 
+mod code_tour;
+
 pub type Opener = Box<dyn Fn(&Path) -> std::io::Result<()>>;
 /// Runs the editor command (program and arguments) on a file and waits. The
 /// terminal loop's runner suspends the screen around it; tests inject one.
@@ -82,6 +84,35 @@ pub struct DecksView {
     pub studied: Option<String>,
     pub error: Option<String>,
     pub list_area: Rect,
+    /// The `/` fuzzy filter: the query and whether it is still being typed.
+    pub filter: Option<DeckFilter>,
+}
+
+#[derive(Debug, Default)]
+pub struct DeckFilter {
+    pub input: TextInput,
+    pub editing: bool,
+}
+
+impl DecksView {
+    /// Recomputes `rows` from the tree: the collapsed tree, or the fuzzy
+    /// matches (best first) while a filter is set.
+    pub fn rebuild_rows(&mut self) {
+        let Some(tree) = &self.tree else {
+            return;
+        };
+        self.rows = match &self.filter {
+            Some(f) if !f.input.text().trim().is_empty() => {
+                let all = backend::all_rows(tree);
+                let order =
+                    crate::fuzzy::rank(f.input.text(), all.iter().map(|r| r.full_name.as_str()));
+                order.into_iter().map(|i| all[i].clone()).collect()
+            }
+            Some(_) => backend::all_rows(tree),
+            None => backend::visible_rows(tree),
+        };
+        self.selected = self.selected.min(self.rows.len().saturating_sub(1));
+    }
 }
 
 #[derive(Debug, Default)]
@@ -235,6 +266,11 @@ pub enum ChoiceValue {
     TimeboxFinish,
     /// A backup from the list offered by `restore-backup` (index).
     Backup(usize),
+    TourEditor(usize),
+    TourCancel,
+    TourAttach(usize),
+    TourMore,
+    TourPickerCancel,
     Cancel,
 }
 
@@ -323,6 +359,10 @@ pub struct App<'a> {
     /// Add / edit and browser screens over `screen`, topmost last.
     pub layers: Vec<Layer>,
     pub(crate) editor: EditorRunner,
+    tour: Option<code_tour::TourActivity>,
+    tour_launcher: code_tour::TourLauncher,
+    tour_picker: Option<code_tour::TourPicker>,
+    tour_editor: Option<serde_json::Value>,
     /// Where the editor flows put their private temporary folders.
     pub(crate) flow_options: FlowOptions,
 }
@@ -366,6 +406,10 @@ impl<'a> App<'a> {
             layers: Vec::new(),
             editor: Box::new(|_, _| Err(std::io::Error::other("No terminal to run the editor in"))),
             flow_options: FlowOptions::default(),
+            tour: None,
+            tour_picker: None,
+            tour_editor: None,
+            tour_launcher: code_tour::launcher(),
         };
         app.next_day_at = backend::sched_timing(&app.backend)
             .ok()
@@ -387,6 +431,7 @@ impl<'a> App<'a> {
         self.keymap = keymap;
     }
     pub fn shutdown(&mut self) {
+        self.tour = None;
         self.cancel_job();
         self.services.audio.shutdown();
         self.clear_images();
@@ -462,8 +507,8 @@ impl<'a> App<'a> {
         match backend::deck_tree(&self.backend) {
             Ok(tree) => {
                 self.totals = Some(backend::total_counts(&tree));
-                view.rows = backend::visible_rows(&tree);
                 view.tree = Some(tree);
+                view.rebuild_rows();
             }
             Err(e) => view.error = Some(e.to_string()),
         }
@@ -482,8 +527,8 @@ impl<'a> App<'a> {
         match backend::deck_tree(&self.backend) {
             Ok(tree) => {
                 self.totals = Some(backend::total_counts(&tree));
-                view.rows = backend::visible_rows(&tree);
                 view.tree = Some(tree);
+                view.rebuild_rows();
                 view.error = None;
             }
             Err(e) => view.error = Some(e.to_string()),
@@ -677,6 +722,8 @@ impl<'a> App<'a> {
 
     fn on_tick(&mut self) {
         let now = self.now;
+        self.poll_code_tour();
+        self.poll_tour_picker();
         self.poll_job();
         self.tick_layers();
         if let Screen::Review(_) = self.screen {
@@ -757,6 +804,9 @@ impl<'a> App<'a> {
     }
 
     fn on_paste(&mut self, text: &str) {
+        if self.tour_holding() {
+            return;
+        }
         if self.sync_ui.is_visible() || self.package_ui.is_some() {
             return;
         }
@@ -780,6 +830,9 @@ impl<'a> App<'a> {
     }
 
     fn on_mouse(&mut self, mouse: MouseEvent) {
+        if self.tour_holding() {
+            return;
+        }
         if self.overlay.is_some()
             || self.sync_ui.is_visible()
             || self.package_ui.is_some()
@@ -872,6 +925,12 @@ impl<'a> App<'a> {
         let Some(chord) = Chord::from_event(&key) else {
             return;
         };
+        if self.tour_holding() && self.overlay.is_none() {
+            if let Some(action) = self.keymap.lookup(&[Scope::Review, Scope::Global], &chord) {
+                self.dispatch(action);
+            }
+            return;
+        }
         // The add and browser screens take every key but their scope's own.
         if self.overlay.is_none()
             && !self.layers.is_empty()
@@ -928,6 +987,9 @@ impl<'a> App<'a> {
         let Some(chord) = Chord::from_event(&key) else {
             return;
         };
+        if self.deck_filter_key(&key) {
+            return;
+        }
         if let Some(action) = self.keymap.lookup(&self.scopes(), &chord) {
             if key.kind == crossterm::event::KeyEventKind::Repeat
                 && matches!(
@@ -945,10 +1007,90 @@ impl<'a> App<'a> {
         }
     }
 
+    /// The deck list's `/` filter. Returns true when it consumed `key`.
+    fn deck_filter_key(&mut self, key: &KeyEvent) -> bool {
+        let Screen::Decks(view) = &mut self.screen else {
+            return false;
+        };
+        let plain = !key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+        match &mut view.filter {
+            None => {
+                if plain && key.code == KeyCode::Char('/') {
+                    view.filter = Some(DeckFilter {
+                        input: TextInput::default(),
+                        editing: true,
+                    });
+                    view.rebuild_rows();
+                    view.selected = 0;
+                    return true;
+                }
+                false
+            }
+            Some(f) if f.editing => {
+                let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+                match key.code {
+                    KeyCode::Esc => {
+                        view.filter = None;
+                        view.rebuild_rows();
+                    }
+                    KeyCode::Enter => f.editing = false,
+                    KeyCode::Down => {
+                        view.selected = (view.selected + 1).min(view.rows.len().saturating_sub(1))
+                    }
+                    KeyCode::Up => view.selected = view.selected.saturating_sub(1),
+                    KeyCode::Char('n') if ctrl => {
+                        view.selected = (view.selected + 1).min(view.rows.len().saturating_sub(1))
+                    }
+                    KeyCode::Char('p') if ctrl => view.selected = view.selected.saturating_sub(1),
+                    _ => {
+                        if f.input.handle_key(key) {
+                            view.selected = 0;
+                            view.rebuild_rows();
+                        }
+                    }
+                }
+                true
+            }
+            Some(_) => {
+                if key.code == KeyCode::Esc {
+                    // Keep the selected deck in view when the tree returns.
+                    let id = view.rows.get(view.selected).map(|r| r.id);
+                    view.filter = None;
+                    view.rebuild_rows();
+                    if let Some(i) = id.and_then(|id| view.rows.iter().position(|r| r.id == id)) {
+                        view.selected = i;
+                    }
+                    return true;
+                }
+                if plain && key.code == KeyCode::Char('/') {
+                    if let Some(f) = &mut view.filter {
+                        f.editing = true;
+                    }
+                    return true;
+                }
+                false
+            }
+        }
+    }
+
     // ---- actions -----------------------------------------------------------
 
     /// Runs `action` on the current screen.
     pub fn dispatch(&mut self, action: Action) {
+        if self.tour_holding()
+            && !matches!(
+                action,
+                Action::ResumeCodeTour
+                    | Action::Quit
+                    | Action::Help
+                    | Action::Palette
+                    | Action::About
+            )
+        {
+            return;
+        }
         let now = self.now;
         if !self.layers.is_empty() {
             // Over a layer only these make sense; screen actions would act
@@ -966,6 +1108,8 @@ impl<'a> App<'a> {
         }
         match action {
             Action::Quit => self.quit = true,
+            Action::OpenCodeTour => self.open_code_tour(),
+            Action::ResumeCodeTour => self.resume_code_tour(),
             Action::AddNote => self.open_add(),
             Action::Browse => {
                 let search = match &self.screen {
@@ -1919,6 +2063,13 @@ impl<'a> App<'a> {
                 self.go_decks();
             }
             ChoiceValue::Backup(index) => self.restore_chosen(index),
+            ChoiceValue::TourEditor(index) => self.choose_tour_editor(index),
+            ChoiceValue::TourCancel => self.resume_code_tour(),
+            ChoiceValue::TourAttach(index) => self.attach_picked_tour(index),
+            ChoiceValue::TourMore => self.more_tours(),
+            ChoiceValue::TourPickerCancel => {
+                self.tour_picker = None;
+            }
             ChoiceValue::Cancel => {}
         }
     }

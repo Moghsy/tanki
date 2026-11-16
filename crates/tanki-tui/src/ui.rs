@@ -25,6 +25,40 @@ fn dim() -> Style {
     Style::default().fg(DIM)
 }
 
+// Continue the bitmap's outer background through the unused review area
+// without sending a larger image to the terminal's graphics protocol.
+fn fill_bitmap_background(buf: &mut Buffer, area: Rect, card: &tanki_render::RenderedCard) {
+    let Some(tanki_render::ImageBlock {
+        source:
+            tanki_render::ImageSource::Bitmap {
+                width,
+                height,
+                rgba,
+                ..
+            },
+        ..
+    }) = card.images.first()
+    else {
+        return;
+    };
+    let Some(offset) = height
+        .checked_sub(1)
+        .and_then(|y| y.checked_mul(*width))
+        .and_then(|pixel| pixel.checked_mul(4))
+        .and_then(|offset| usize::try_from(offset).ok())
+    else {
+        return;
+    };
+    let Some(pixel) = rgba.get(offset..offset.saturating_add(4)) else {
+        return;
+    };
+    if pixel[3] != 255 {
+        return;
+    }
+    let background = Style::default().bg(Color::Rgb(pixel[0], pixel[1], pixel[2]));
+    buf.set_style(area.intersection(buf.area), background);
+}
+
 fn count_span(n: u32, color: Color) -> Span<'static> {
     let style = if n == 0 {
         dim()
@@ -253,9 +287,23 @@ impl App<'_> {
                 Line::from(Span::styled(studied.clone(), dim())).alignment(Alignment::Center);
             frame.render_widget(line, Rect::new(area.x, footer_y, area.width, 1));
         }
-        let hint = "Enter open · s study · y sync · Space collapse · : commands · ? help";
+        let hint = "Enter open · / find · s study · y sync · Space collapse · : commands · ? help";
         let line = Line::from(Span::styled(hint, dim())).alignment(Alignment::Center);
         frame.render_widget(line, Rect::new(area.x, footer_y + 1, area.width, 1));
+        if let Some(f) = &view.filter {
+            let y = list.bottom();
+            if y < area.bottom() {
+                let text = format!("/{}", f.input.text());
+                buf_line(
+                    frame,
+                    Rect::new(area.x + 1, y, area.width.saturating_sub(1), 1),
+                    &text,
+                );
+                if f.editing {
+                    frame.set_cursor_position((area.x + 2 + f.input.cursor_column() as u16, y));
+                }
+            }
+        }
     }
 
     // ---- overview ----------------------------------------------------------
@@ -521,6 +569,11 @@ impl App<'_> {
         let card = &render.card;
         let scroll = view.scroll;
         let buf = frame.buffer_mut();
+        fill_bitmap_background(
+            buf,
+            Rect::new(area.x, card_area.y, area.width, card_area.height),
+            card,
+        );
         self.services.renderer.paint(card, scroll, card_area, buf);
         // Slice images against the viewport, preserving full-card scale.
         for block in &card.images {
@@ -682,6 +735,46 @@ impl App<'_> {
         let Some(card) = r.card() else {
             return;
         };
+        if let Some(status) = self.tour_status() {
+            let status: String = status.chars().filter(|c| !c.is_control()).collect();
+            buf.set_stringn(
+                bar.x + 1,
+                bar.y + 1,
+                status,
+                bar.width.saturating_sub(2) as usize,
+                dim(),
+            );
+            let text = format!(
+                "{} Return to card · rating paused",
+                self.keymap.hint(&scopes, Action::ResumeCodeTour)
+            );
+            buf.set_stringn(
+                bar.x + 1,
+                bar.y + 2,
+                text,
+                bar.width.saturating_sub(2) as usize,
+                Style::default().fg(Color::Cyan),
+            );
+            return;
+        }
+        if r.phase() == Phase::Answer && card.queued.code_tour.is_some() {
+            let text = match &card.queued.code_tour {
+                Some(tanki_core::code_tour::Attachment::Invalid(_)) => {
+                    "Invalid CodeTour reference".to_string()
+                }
+                _ => format!(
+                    "{} Open code-tour",
+                    self.keymap.hint(&scopes, Action::OpenCodeTour)
+                ),
+            };
+            buf.set_stringn(
+                bar.x + 1,
+                bar.y,
+                text,
+                bar.width.saturating_sub(15) as usize,
+                Style::default().fg(Color::Cyan),
+            );
+        }
         let more = format!("More {}", self.keymap.hint(&scopes, Action::More));
         buf.set_string(
             bar.right().saturating_sub(more.width() as u16 + 1),
@@ -1243,4 +1336,40 @@ fn hint_text(hints: &[(&str, &str)]) -> String {
         .map(|(k, d)| format!("{k} {d}"))
         .collect::<Vec<_>>()
         .join("  ")
+}
+
+#[cfg(test)]
+mod bitmap_background_tests {
+    use super::*;
+    use std::sync::Arc;
+    use tanki_render::{ImageBlock, ImageSource, RenderedCard};
+
+    #[test]
+    fn extends_bitmap_background_only_inside_review_area() {
+        let mut buf = Buffer::empty(Rect::new(0, 0, 8, 6));
+        let card = RenderedCard {
+            images: vec![ImageBlock {
+                source: ImageSource::Bitmap {
+                    id: 1,
+                    width: 1,
+                    height: 2,
+                    rgba: Arc::new(vec![255, 0, 0, 255, 35, 45, 55, 255]),
+                },
+                row: 0,
+                col: 0,
+                width: 1,
+                height: 1,
+                alt: String::new(),
+            }],
+            ..Default::default()
+        };
+        fill_bitmap_background(&mut buf, Rect::new(0, 1, 8, 4), &card);
+        assert_eq!(buf[(0, 4)].bg, Color::Rgb(35, 45, 55));
+        assert_eq!(buf[(7, 4)].bg, Color::Rgb(35, 45, 55));
+        assert_eq!(buf[(0, 5)].bg, Color::Reset);
+    }
+}
+
+fn buf_line(frame: &mut Frame, area: Rect, text: &str) {
+    frame.render_widget(Line::from(Span::raw(text.to_owned())), area);
 }

@@ -152,6 +152,8 @@ actions! {
     DeleteNote = "delete-note", "Delete note...";
     ToggleAutoAdvance = "toggle-auto-advance", "Toggle auto advance";
     ZoomImage = "zoom-image", "Zoom images";
+    OpenCodeTour = "open-code-tour", "Open saved code-tour in Neovim";
+    ResumeCodeTour = "resume-code-tour", "Return to card from code-tour";
     OpenInBrowser = "open-in-browser", "Open card in the web browser";
     ToggleHints = "toggle-hints", "Show / hide hints";
     ToggleDetails = "toggle-details", "Show / hide details";
@@ -432,6 +434,8 @@ pub const DEFAULTS: &[(&str, &str, &str)] = &[
     ("overview", "shift+b", "backup-now"),
     ("overview", "shift+r", "restore-backup"),
     // Reviewer (R4 §22.3, reviewer.py `_shortcutKeys`).
+    ("review", "shift+o", "open-code-tour"),
+    ("review", "ctrl+o", "resume-code-tour"),
     ("review", "space", "show-answer"),
     ("review", "enter", "show-answer"),
     ("review", "1", "again"),

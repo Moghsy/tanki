@@ -1,0 +1,147 @@
+--- a/bin/code-tour
++++ b/bin/code-tour
+@@ -308,8 +308,12 @@
+     saving.add_argument('--title')
+     saving.add_argument('--overwrite', metavar='ID')
+     saving.add_argument('--revision', metavar='REV')
++    inspecting = commands.add_parser('inspect')
++    inspecting.add_argument('id')
+     opening = commands.add_parser('open')
+     opening.add_argument('id')
++    opening.add_argument('--standalone', action='store_true', help='Read saved content without an AI conversation or generation')
++    opening.add_argument('--no-focus', action='store_true')
+     opening.add_argument('--repo', nargs=2, action='append', default=[], metavar=('ID', 'PATH'))
+     opening.add_argument('--map-file', nargs=3, action='append', default=[], metavar=('REPO', 'OLD', 'NEW'))
+     for command_parser in (saving, opening):
+@@ -340,17 +344,20 @@
+         if not re.fullmatch('[0-9a-f]{32}', args.id):
+             parser.error('Invalid tour ID')
+         metadata = saved_metadata(directory / (args.id + '.json'))
+-        overrides = dict(args.repo)
+-        if len(overrides) != len(args.repo):
++        overrides = dict(getattr(args, 'repo', []))
++        if len(overrides) != len(getattr(args, 'repo', [])):
+             parser.error('Duplicate repository override')
+         repo_ids = {repo['id'] for repo in metadata['repositories']}
+         if not overrides.keys() <= repo_ids:
+             parser.error('Unknown repository override')
+-        for repo_id, path in args.repo:
++        for repo_id, path in getattr(args, 'repo', []):
+             if not Path(path).is_absolute():
+                 parser.error('Repository override requires an absolute path')
+         roots = [Path(overrides.get(repo['id'], repo['root'])) for repo in metadata['repositories']]
+         roots = [root for root in roots if root.is_dir()]
++    if args.operation == 'inspect':
++        print(json.dumps(metadata))
++        return 0
+     key, live = session_key(args), instances()
+     candidates = []
+     for root in roots or [Path.cwd()]:
+@@ -372,19 +379,29 @@
+         result = deliver(target, 'save_saved', [opts], timeout=15)
+     else:
+         opts.update(repositories=dict(args.repo), files=args.map_file, cli=str(Path(__file__).resolve()))
+-        current_origin = origin(args, roots[0] if roots else Path.cwd())
++        opts['standalone'] = args.standalone
++        current_origin = None if args.standalone else origin(args, roots[0] if roots else Path.cwd())
+         if current_origin is not None:
+             opts['origin'] = current_origin
+         result = deliver(target, 'open_saved', [args.id, opts], timeout=15)
+     remember(key, target)
+     if args.operation == 'open':
+-        focus(target)
++        result['editor'] = target
++        result['focus_error'] = None
++        if not args.no_focus:
++            try:
++                focus(target)
++            except (RuntimeError, OSError) as error:
++                result['focus_error'] = str(error)
+     print(json.dumps(result))
+     return 0
+ 
+ 
+ def main(argv=None):
+     argv = list(sys.argv[1:] if argv is None else argv)
++    if argv and argv[0] == 'capabilities':
++        print(json.dumps(dict(protocol=1, standalone=True, inspect=True, no_focus=True)))
++        return 0
+     if argv and argv[0] == 'saved':
+         return saved_main(argv[1:])
+     if argv and argv[0] in ('show', 'answer', 'fill'):
+--- a/lua/code-tour/tour.lua
++++ b/lua/code-tour/tour.lua
+@@ -274,7 +274,8 @@
+   local first = #s.stops + 1
+   vim.list_extend(s.stops, data)
+   s.root, s.review, s.base = root, review, base
+-  s.origin = opts.origin or (append and s.origin or nil)
++  s.standalone = opts.standalone == true
++  s.origin = not s.standalone and (opts.origin or (append and s.origin or nil)) or nil
+   s.cli = opts.cli or s.cli
+   s.visible = true
+   reset_pages()
+@@ -506,6 +507,7 @@
+ end
+ 
+ function M.ask(question, action, selected)
++  if s.standalone then notify("Standalone review: generation is disabled"); return end
+   local stop, box = current()
+   if not stop then
+     return
+@@ -602,6 +604,7 @@
+ end
+ 
+ function M.explain_range(selection, context, action)
++  if s.standalone then notify("Standalone review: generation is disabled"); return end
+   assert(selection.tour == s.id, "The tour changed; select the code again")
+   assert(
+     vim.api.nvim_buf_is_valid(selection.buf) and vim.api.nvim_buf_get_changedtick(selection.buf) == selection.tick,
+@@ -667,6 +670,7 @@
+ end
+ 
+ function M.explain(selected, with_context)
++  if s.standalone then notify("Standalone review: generation is disabled"); return end
+   local _, active_box = current()
+   local mode = vim.api.nvim_get_mode().mode
+   if not selected and not mode:match("^[vV\22]") and active_box and active_box._saved then
+@@ -714,6 +718,7 @@
+ end
+ 
+ function M.explain_symbol(context, reason, call)
++  if s.standalone then notify("Standalone review: generation is disabled"); return end
+   if context.tour ~= s.id or not locate(context.stop, context.box) then return end
+   if not context.expression:find("%S") then notify("Place the cursor on a symbol to inspect it"); return end
+   for id, pending in pairs(s.pending) do
+@@ -772,6 +777,7 @@
+ end
+ 
+ function M.explain_location(location, call, inspect)
++  if s.standalone then notify("Standalone review: generation is disabled"); return end
+   local stop, box = current()
+   if not stop then
+     return
+@@ -942,6 +948,7 @@
+ end
+ 
+ function M.explain_definition(inspect)
++  if s.standalone then notify("Standalone review: generation is disabled"); return end
+   inspect = inspect == true
+   local stop, box = current()
+   if not stop then return end
+--- a/lua/code-tour/saved.lua
++++ b/lua/code-tour/saved.lua
+@@ -609,6 +609,13 @@
+ function M.start(state, plan, hooks)
+   state.saved, plan.hooks = plan, hooks
+   M.revalidate(state)
++  if state.standalone then
++    for _, entry in ipairs(plan.queue) do
++      unavailable(entry, "unavailable", "Source requires regeneration; disabled in standalone review")
++    end
++    plan.queue = {}
++    return
++  end
+   dispatch(state)
+ end
+ -- Validate and apply one reply stop to the box it names.

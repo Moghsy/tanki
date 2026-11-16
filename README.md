@@ -69,6 +69,15 @@ Collection custom scheduling scripts run in QuickJS, including `await`,
 execution limit and a 16 MiB runtime limit. Script failures show a warning
 and leave that card's standard scheduling states unchanged.
 
+## Neovim code-tour cards
+
+Store an existing saved code-tour in a note's `CodeTour` field. Reveal the
+answer, press Shift+O to open it in Neovim, then Ctrl+O to return and rate.
+`tanki tour` provides setup checks, saved-tour listing, card creation and
+attachment. The add/edit form has an Alt+G tour picker. See
+[Neovim setup and usage](docs/neovim.md) for the companion plugin patch and
+configuration.
+
 ## Development
 
 Prerequisites: Rust 1.97.1, a C compiler, protoc (31.1 recommended), and the ALSA development headers plus pkg-config on Linux (`libasound2-dev` and `pkg-config` on Debian/Ubuntu). Install these explicitly; setup does not download executable tools.

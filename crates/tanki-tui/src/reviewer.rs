@@ -142,6 +142,11 @@ pub fn media_tag(tag: &AudioTag) -> MediaTag {
 
 pub struct Reviewer {
     phase: Phase,
+    hold_at: Option<Instant>,
+    held: Duration,
+    timebox_held: Duration,
+    held_invalid: bool,
+    answer_active: Option<Duration>,
     card: Option<ReviewCard>,
     /// Rendering the next queued card never answers or removes it. The UI
     /// warms its optional bitmap cache while this card is on screen.
@@ -165,6 +170,11 @@ impl Reviewer {
     pub fn new(now: Now) -> Self {
         Self {
             phase: Phase::Question,
+            hold_at: None,
+            held: Duration::ZERO,
+            timebox_held: Duration::ZERO,
+            held_invalid: false,
+            answer_active: None,
             card: None,
             next_rendered: None,
             counts: Counts::default(),
@@ -184,6 +194,52 @@ impl Reviewer {
 
     // ---- read access for the screen -------------------------------------
 
+    pub fn holding(&self) -> bool {
+        self.hold_at.is_some()
+    }
+    fn active_duration(&self, end: Instant) -> Duration {
+        let end = self.hold_at.map_or(end, |start| end.min(start));
+        end.saturating_duration_since(self.shown_at)
+            .saturating_sub(self.held)
+    }
+    pub fn begin_tour(&mut self, now: Now) -> bool {
+        if self.holding() || self.phase != Phase::Answer || self.card.is_none() {
+            return false;
+        }
+        self.hold_at = Some(now.at);
+        self.held_invalid = false;
+        self.auto = None;
+        self.auto_advance = false;
+        true
+    }
+    pub fn end_tour(&mut self, b: &dyn Backend, now: Now) -> Vec<Effect> {
+        let Some(start) = self.hold_at.take() else {
+            return Vec::new();
+        };
+        let duration = now.at.saturating_duration_since(start);
+        self.held += duration;
+        self.timebox_held += duration;
+        let mut fx = Vec::new();
+        let rollover = self.next_day_at.is_some_and(|t| now.wall_ms / 1000 >= t);
+        if self.held_invalid || rollover {
+            // If refreshing fails, Transition continues to block stale ratings.
+            self.phase = Phase::Transition;
+            if rollover {
+                self.next_day_at = backend::sched_timing(b)
+                    .ok()
+                    .map(|t| t.next_day_at)
+                    .filter(|t| now.wall_ms / 1000 < *t);
+            }
+            self.refresh(b, now, false, &mut fx);
+            if !fx.iter().any(|effect| matches!(effect, Effect::Error(_))) {
+                fx.push(Effect::Notice(
+                    "Card or collection changed while the tour was open; review reloaded".into(),
+                ));
+            }
+        }
+        self.held_invalid = false;
+        fx
+    }
     pub fn phase(&self) -> Phase {
         self.phase
     }
@@ -239,7 +295,12 @@ impl Reviewer {
             Some(at) if config.stop_timer_on_answer && self.phase != Phase::Question => at,
             _ => now,
         };
-        let secs = end.saturating_duration_since(self.shown_at).as_secs();
+        let secs = if config.stop_timer_on_answer && self.phase != Phase::Question {
+            self.answer_active.unwrap_or_default()
+        } else {
+            self.active_duration(end)
+        }
+        .as_secs();
         let cap = u64::from(config.cap_answer_time_secs);
         Some(if cap > 0 && secs >= cap {
             TimerView {
@@ -268,6 +329,7 @@ impl Reviewer {
     /// scheduler version and shows the first card.
     pub fn start(&mut self, b: &dyn Backend, now: Now) -> Vec<Effect> {
         self.timebox_start = now.at;
+        self.timebox_held = Duration::ZERO;
         self.timebox_reps = 0;
         self.timebox_pending = false;
         self.next_day_at = backend::sched_timing(b).ok().map(|t| t.next_day_at);
@@ -381,6 +443,8 @@ impl Reviewer {
     fn show_question(&mut self, now: Now, fx: &mut Vec<Effect>) {
         self.phase = Phase::Question;
         self.shown_at = now.at;
+        self.held = Duration::ZERO;
+        self.answer_active = None;
         self.answer_at = None;
         self.comparison = None;
         self.expanded.clear();
@@ -428,6 +492,7 @@ impl Reviewer {
         }
         self.phase = Phase::Answer;
         self.answer_at = Some(now.at);
+        self.answer_active = Some(self.active_duration(now.at));
         fx.push(Effect::CardChanged);
         fx.extend(self.cue(CueKind::ShowAnswer));
         self.schedule_auto(now);
@@ -446,7 +511,7 @@ impl Reviewer {
     /// `_answerCard(ease)`.
     pub fn answer(&mut self, b: &dyn Backend, rating: Rating, now: Now) -> Vec<Effect> {
         let mut fx = Vec::new();
-        if self.phase != Phase::Answer {
+        if self.holding() || self.phase != Phase::Answer {
             return fx;
         }
         let Some(card) = self.card.as_ref() else {
@@ -454,7 +519,7 @@ impl Reviewer {
         };
         let card_id = card.queued.id;
         let timebox_secs = card.config.timebox_secs;
-        let taken = now.at.saturating_duration_since(self.shown_at).as_millis();
+        let taken = self.active_duration(now.at).as_millis();
         self.phase = Phase::Transition;
         self.auto = None;
         let outcome = match backend::answer(
@@ -480,7 +545,10 @@ impl Reviewer {
         }
         self.timebox_reps += 1;
         // `col.timeboxReached()`: reports the limit, not the elapsed time.
-        let elapsed = now.at.saturating_duration_since(self.timebox_start);
+        let elapsed = now
+            .at
+            .saturating_duration_since(self.timebox_start)
+            .saturating_sub(self.timebox_held);
         if timebox_secs > 0 && elapsed > Duration::from_secs(u64::from(timebox_secs)) {
             self.timebox_pending = true;
             fx.push(Effect::Timebox {
@@ -500,6 +568,7 @@ impl Reviewer {
         }
         self.timebox_pending = false;
         self.timebox_start = now.at;
+        self.timebox_held = Duration::ZERO;
         self.timebox_reps = 0;
         self.next_card(b, now)
     }
@@ -511,7 +580,7 @@ impl Reviewer {
 
     /// Undo (`u`, Ctrl+Z) or redo, then a fresh queue.
     pub fn undo(&mut self, b: &dyn Backend, redo: bool, now: Now) -> Vec<Effect> {
-        if self.phase == Phase::Transition {
+        if self.holding() || self.phase == Phase::Transition {
             return Vec::new();
         }
         let mut fx = Vec::new();
@@ -528,6 +597,17 @@ impl Reviewer {
     /// `OpChanges` from elsewhere (`op_executed` / `refresh_if_needed`).
     pub fn on_changes(&mut self, b: &dyn Backend, changes: &OpChanges, now: Now) -> Vec<Effect> {
         let mut fx = Vec::new();
+        if self.holding() {
+            self.held_invalid |= changes.card
+                || changes.note
+                || changes.note_text
+                || changes.notetype
+                || changes.config
+                || changes.deck_config
+                || changes.study_queues
+                || changes.deck;
+            return fx;
+        }
         if self.timebox_pending || self.phase == Phase::Transition {
             return fx;
         }
@@ -616,6 +696,9 @@ impl Reviewer {
         audio_playing: bool,
         focused: bool,
     ) -> Vec<Effect> {
+        if self.holding() {
+            return Vec::new();
+        }
         if self.next_day_at.is_some_and(|t| now.wall_ms / 1000 >= t) {
             return self.rollover(b, now);
         }
@@ -634,6 +717,9 @@ impl Reviewer {
 
     /// The audio queue ran out (`AudioEvent::Idle`).
     pub fn audio_idle(&mut self, b: &dyn Backend, now: Now, focused: bool) -> Vec<Effect> {
+        if self.holding() {
+            return Vec::new();
+        }
         match self.auto {
             Some(timer) if now.at >= timer.due => self.fire_auto(b, timer, now, focused),
             _ => Vec::new(),
@@ -701,7 +787,7 @@ impl Reviewer {
         now: Now,
     ) -> Vec<Effect> {
         let mut fx = Vec::new();
-        if self.phase == Phase::Transition || self.card.is_none() {
+        if self.holding() || self.phase == Phase::Transition || self.card.is_none() {
             return fx;
         }
         match backend::changes(b, command) {

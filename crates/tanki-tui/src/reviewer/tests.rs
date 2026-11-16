@@ -678,3 +678,117 @@ fn congrats_message_units() {
     assert!(next_learn_message(3600, 2).contains("in 1 hour."));
     assert_eq!(undo_notice("", false), "Change undone");
 }
+
+#[test]
+fn code_tour_hold_blocks_timers_and_subtracts_only_external_time() {
+    let b = FakeBackend::new(vec![card(1, "Q", "A"), card(2, "Q2", "A2")]);
+    b.with(|s| {
+        s.config.show_timer = true;
+        s.config.cap_answer_time_secs = 0;
+        s.config.seconds_to_show_answer = 1.0;
+        s.config.timebox_secs = 30;
+    });
+    let now = t0();
+    let (mut r, _) = started(&b, now);
+    assert!(!r.begin_tour(now));
+    r.show_answer(&b, now.plus_millis(1000));
+    r.toggle_auto_advance(now.plus_millis(1000));
+    assert!(r.begin_tour(now.plus_millis(2000)));
+    assert!(!r.begin_tour(now.plus_millis(2000)));
+    assert!(r.tick(&b, now.plus_millis(60000), false, true).is_empty());
+    assert!(r
+        .answer(&b, Rating::Good, now.plus_millis(60000))
+        .is_empty());
+    assert_eq!(r.timer(now.plus_millis(60000).at).unwrap().secs, 2);
+    r.end_tour(&b, now.plus_millis(62000));
+    assert!(!r.auto_advance());
+    r.begin_tour(now.plus_millis(63000));
+    r.end_tour(&b, now.plus_millis(123000));
+    let fx = r.answer(&b, Rating::Good, now.plus_millis(124000));
+    assert!(!fx.iter().any(|e| matches!(e, Effect::Timebox { .. })));
+    assert_eq!(b.state.borrow().answered[0].milliseconds_taken, 4000);
+    assert_eq!(
+        b.state.borrow().answered[0].answered_at_millis,
+        now.plus_millis(124000).wall_ms
+    );
+}
+#[test]
+fn code_tour_defers_external_changes_and_refreshes_before_rating() {
+    let b = FakeBackend::new(vec![card(1, "Q", "A")]);
+    let now = t0();
+    let (mut r, _) = started(&b, now);
+    r.show_answer(&b, now);
+    r.begin_tour(now);
+    b.clear_log();
+    r.on_changes(
+        &b,
+        &OpChanges {
+            note_text: true,
+            ..Default::default()
+        },
+        now,
+    );
+    assert!(b.names().is_empty());
+    let fx = r.end_tour(&b, now.plus_millis(1000));
+    assert_eq!(r.phase(), Phase::Question);
+    assert!(fx
+        .iter()
+        .any(|e| matches!(e, Effect::Notice(s) if s.contains("reloaded"))));
+    assert!(b.names().contains(&"Queue".into()));
+    assert!(b.state.borrow().answered.is_empty());
+}
+
+#[test]
+fn code_tour_failed_refresh_cannot_answer_cached_states() {
+    let b = FakeBackend::new(vec![card(1, "Q", "A")]);
+    let now = t0();
+    let (mut r, _) = started(&b, now);
+    r.show_answer(&b, now);
+    r.begin_tour(now);
+    r.on_changes(
+        &b,
+        &OpChanges {
+            study_queues: true,
+            ..Default::default()
+        },
+        now,
+    );
+    b.fail("Queue", CoreError::Other("offline collection".into()));
+    r.end_tour(&b, now.plus_millis(1000));
+    assert_eq!(r.phase(), Phase::Transition);
+    assert!(r.answer(&b, Rating::Good, now.plus_millis(1000)).is_empty());
+    assert!(b.state.borrow().answered.is_empty());
+}
+
+#[test]
+fn code_tour_hold_does_not_carry_into_the_next_timebox() {
+    let b = FakeBackend::new(vec![card(1, "Q", "A"), card(2, "Q2", "A2")]);
+    b.with(|s| s.config.timebox_secs = 30);
+    let now = t0();
+    let (mut r, _) = started(&b, now);
+    r.show_answer(&b, now);
+    r.begin_tour(now.plus_millis(1000));
+    r.end_tour(&b, now.plus_millis(61000));
+    let fx = r.answer(&b, Rating::Good, now.plus_millis(91000));
+    assert!(fx.iter().any(|e| matches!(e, Effect::Timebox { .. })));
+    r.timebox_continue(&b, now.plus_millis(92000));
+    r.show_answer(&b, now.plus_millis(92000));
+    let fx = r.answer(&b, Rating::Good, now.plus_millis(123000));
+    assert!(fx.iter().any(|e| matches!(e, Effect::Timebox { .. })));
+}
+#[test]
+fn code_tour_day_rollover_waits_until_return_then_reveals_question() {
+    let now = t0();
+    let b = FakeBackend::new(vec![card(1, "Q", "A")]);
+    b.with(|s| s.timing.next_day_at = now.wall_ms / 1000 + 1);
+    let (mut r, _) = started(&b, now);
+    r.show_answer(&b, now);
+    r.begin_tour(now);
+    b.clear_log();
+    r.tick(&b, now.plus_millis(5000), false, true);
+    assert!(b.names().is_empty());
+    r.end_tour(&b, now.plus_millis(5000));
+    assert_eq!(r.phase(), Phase::Question);
+    assert!(b.names().contains(&"Queue".into()));
+    assert!(b.state.borrow().answered.is_empty());
+}

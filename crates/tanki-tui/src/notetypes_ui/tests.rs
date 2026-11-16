@@ -166,6 +166,7 @@ impl Fake {
                 .ok_or_else(|| CoreError::Invalid("no such note type".into()))
         };
         Ok(match command {
+            NotetypeCommand::InstallCodeTour => unreachable!("Not a note-type editor action"),
             NotetypeCommand::List => {
                 NotetypeResponse::List(types.iter().map(Self::summary).collect())
             }

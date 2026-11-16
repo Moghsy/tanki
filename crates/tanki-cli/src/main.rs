@@ -5,6 +5,7 @@ mod profile_commands;
 mod serve_commands;
 mod stats_commands;
 mod sync_commands;
+mod tour_commands;
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
@@ -125,6 +126,8 @@ impl From<GraphicsArg> for tanki_term::GraphicsMode {
 enum CliCommand {
     /// Start interactive study of the current deck, or the named deck.
     Review { deck: Option<String> },
+    /// Create and review cards linked to saved Neovim code-tours.
+    Tour(tour_commands::TourArgs),
     /// Print every deck with New, Learn and Due counts.
     Decks,
     /// Probe terminal capabilities and display a test image.
@@ -404,6 +407,21 @@ fn run(args: Args) -> Result<()> {
                 sync_commands::run(actor, command, args.json, &config)
             })?;
         }
+        Some(CliCommand::Tour(command)) => {
+            let settings = config_path(&args)
+                .as_ref()
+                .map(|p| tanki_core::config::Config::load(p))
+                .transpose()?
+                .unwrap_or_default()
+                .code_tour;
+            if command.needs_collection() {
+                with_collection(&profile_path(&args)?, &args, |actor| {
+                    tour_commands::run(Some(actor), command, &settings, args.json)
+                })?;
+            } else {
+                tour_commands::run(None, command, &settings, args.json)?;
+            }
+        }
         Some(CliCommand::Doctor) => {
             let report = tanki_term::SystemTerminalDoctor.run(&tanki_term::DoctorOptions {
                 graphics: args.graphics.into(),
@@ -464,7 +482,15 @@ fn run(args: Args) -> Result<()> {
         }
         Some(CliCommand::Serve(command)) => {
             with_collection(&profile_path(&args)?, &args, |actor| {
-                serve_commands::run(actor, command, args.json, &tanki_core::config::Config::load(&config_path(&args).ok_or("No config folder")?)?.connect)
+                serve_commands::run(
+                    actor,
+                    command,
+                    args.json,
+                    &tanki_core::config::Config::load(
+                        &config_path(&args).ok_or("No config folder")?,
+                    )?
+                    .connect,
+                )
             })?;
         }
         Some(CliCommand::Delete(command)) => {

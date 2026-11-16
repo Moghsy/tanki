@@ -391,3 +391,35 @@ mod tests {
         );
     }
 }
+
+/// Every deck as a flat row labelled with its full name, ignoring collapse
+/// state; used by the deck-list fuzzy filter.
+pub fn all_rows(root: &Deck) -> Vec<DeckRow> {
+    fn walk(deck: &Deck, prefix: &str, out: &mut Vec<DeckRow>) {
+        let full_name = if prefix.is_empty() {
+            deck.name.clone()
+        } else {
+            format!("{prefix}::{}", deck.name)
+        };
+        out.push(DeckRow {
+            id: deck.id,
+            name: full_name.clone(),
+            full_name: full_name.clone(),
+            depth: 0,
+            new: deck.new,
+            learning: deck.learning,
+            review: deck.review,
+            collapsed: false,
+            filtered: deck.filtered,
+            has_children: false,
+        });
+        for child in &deck.children {
+            walk(child, &full_name, out);
+        }
+    }
+    let mut out = Vec::new();
+    for child in &root.children {
+        walk(child, "", &mut out);
+    }
+    out
+}

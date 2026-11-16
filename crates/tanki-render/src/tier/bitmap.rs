@@ -24,6 +24,7 @@ use std::{
 const MAX_CACHE: usize = 8;
 const MAX_CACHE_BYTES: usize = 256 << 20;
 const MAX_HEIGHT: u32 = 8192;
+const CARD_ZOOM: f32 = 1.5;
 type Cached = Result<RenderedCard, String>;
 
 #[derive(Default)]
@@ -280,7 +281,11 @@ pub(super) fn rasterize(side: &CardSide, opts: &RenderOptions) -> Cached {
     } else {
         String::new()
     };
-    let math_html = crate::math::prepare_html(&side.html, ch, fg);
+    let math_html = crate::math::prepare_html(
+        &side.html,
+        (f32::from(ch) / CARD_ZOOM).round().max(1.0) as u16,
+        fg,
+    );
     let (card_html, generated) = inline_svg_resources(&math_html)?;
     let html = format!("<!doctype html><html><head><style>html,body{{margin:0;{colors}}} body{{padding:8px;box-sizing:border-box}} img{{max-width:100%}} {} {night_css}</style></head><body class=\"{} {night}\"><div id=qa>{card_html}</div></body></html>", side.css, attr(&side.body_classes));
     let mut doc = HtmlDocument::from_html(
@@ -289,7 +294,7 @@ pub(super) fn rasterize(side: &CardSide, opts: &RenderOptions) -> Cached {
             viewport: Some(Viewport::new(
                 width,
                 viewport_height,
-                1.0,
+                CARD_ZOOM,
                 if opts.night_mode {
                     ColorScheme::Dark
                 } else {
@@ -308,10 +313,11 @@ pub(super) fn rasterize(side: &CardSide, opts: &RenderOptions) -> Cached {
         doc.resolve(0.0);
     }
     let layout = doc.root_element().final_layout();
-    let content_height = layout
+    let content_height = (layout
         .size
         .height
         .max(layout.scrollable_overflow_rect.bottom)
+        * CARD_ZOOM)
         .ceil()
         .max(1.0) as u32;
     let max_height = (MAX_HEIGHT / u32::from(ch)).max(1) * u32::from(ch);
@@ -323,11 +329,13 @@ pub(super) fn rasterize(side: &CardSide, opts: &RenderOptions) -> Cached {
     let answer_row = doc
         .get_element_by_id("answer")
         .and_then(|id| doc.get_client_bounding_rect(id))
-        .map(|rect| (rect.y.max(0.0) / f64::from(ch)) as usize);
+        .map(|rect| (rect.y.max(0.0) * f64::from(CARD_ZOOM) / f64::from(ch)) as usize);
     let mut renderer = VelloCpuImageRenderer::new(width, height);
     let mut rgba = Vec::new();
     renderer.render_to_vec(
-        |scene| blitz_paint::paint_scene(scene, &mut doc, 1.0, width, height, 0, 0),
+        |scene| {
+            blitz_paint::paint_scene(scene, &mut doc, f64::from(CARD_ZOOM), width, height, 0, 0)
+        },
         &mut rgba,
     );
     let rows = height.div_ceil(u32::from(ch)).min(u32::from(u16::MAX)) as u16;
@@ -365,6 +373,41 @@ static NEXT_BITMAP_ID: AtomicU64 = AtomicU64::new(1);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn enlarged_bitmap_scales_content_and_answer_position() {
+        let media = tempfile::tempdir().unwrap();
+        let side = CardSide {
+            html: "<div style='width:40px;height:40px;background:#ff0000'></div><div id='answer' style='height:20px;background:#00ff00'></div>".into(),
+            media_dir: media.path().into(),
+            ..Default::default()
+        };
+        let card = rasterize(
+            &side,
+            &RenderOptions {
+                width: 30,
+                viewport_rows: 5,
+                cell_px: Some((10, 10)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let ImageSource::Bitmap {
+            width,
+            height,
+            rgba,
+            ..
+        } = &card.images[0].source
+        else {
+            panic!()
+        };
+        let pixel = |x: u32, y: u32| &rgba[((y * width + x) * 4) as usize..][..4];
+        assert_eq!(pixel(65, 15), &[255, 0, 0, 255]);
+        assert_eq!(pixel(15, 85), &[0, 255, 0, 255]);
+        assert!(*height >= 114);
+        assert_eq!(card.answer_row, Some(7));
+        assert!(card.images[0].height > 5);
+    }
 
     #[test]
     fn local_images_and_stylesheets_are_loaded_in_the_bitmap() {
