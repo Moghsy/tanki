@@ -6,3 +6,6 @@
 /xtask/bootstrap/target/
 /scripts/__pycache__/
 /.cargo/bounded.lock
+
+# Installed plugins live outside the repo; tanki ships only the host.
+/plugins/

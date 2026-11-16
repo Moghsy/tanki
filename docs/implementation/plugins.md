@@ -145,7 +145,10 @@ Unknown, ungranted or malformed messages drop the plugin. Handshake timeout is
 
 ## 6. Code-tour as the first plugin
 
-Moves to `plugins/code-tour/` (Rust workspace member):
+Moves out of this repository into its own project (decided 2026-11-16: tanki
+ships only the host, and a root `/plugins/` folder is git-ignored). The plugin
+is a standalone Rust crate that copies the few small types it needs (the
+`CodeTourRef` parser) instead of depending on tanki crates. It takes over:
 
 - the `CodeTour` field parser and `CodeTourRef` (from `tanki-core/src/code_tour.rs`);
 - the Neovim bridge, editor discovery and Herdr launch (from `tanki-tui/src/code_tour.rs`);
