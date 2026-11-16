@@ -635,3 +635,45 @@ fn plugin_actions_are_chosen_and_forwarded() {
         [("fake".to_owned(), "open".to_owned(), 1)]
     );
 }
+
+#[test]
+fn plugin_hint_shows_with_the_answer_for_its_own_card_only() {
+    use tanki_plugin::EventKind::*;
+    let b = FakeBackend::new(vec![card(1, "Q", "A")]);
+    let now = t0();
+    let (mut a, shared) = plugin_app(&b, now);
+    let shown = |a: &mut App<'_>| buffer_text(&rendered(a, 80, 24)).join("\n");
+    let hint = |card_id, text: Option<&str>| {
+        plugin_port::event(Hint {
+            card_id,
+            text: text.map(str::to_owned),
+        })
+    };
+    // Nothing on the question side, even when a hint is already known.
+    shared.borrow_mut().pending = vec![hint(1, Some("Open code-tour in Neovim"))];
+    a.handle(AppEvent::Tick, now);
+    assert!(!shown(&mut a).contains("Open code-tour"));
+    a.dispatch(Action::ShowAnswerOrGood);
+    let text = shown(&mut a);
+    assert!(text.contains("Shift+O Open code-tour in Neovim"), "{text}");
+    // A late hint for another card is not shown on this one.
+    shared.borrow_mut().pending = vec![hint(2, Some("Open other"))];
+    a.handle(AppEvent::Tick, now);
+    assert!(!shown(&mut a).contains("Open code-tour"));
+    // Clearing, and a dropped plugin, remove it.
+    shared.borrow_mut().pending = vec![hint(1, Some("Open code-tour in Neovim"))];
+    a.handle(AppEvent::Tick, now);
+    assert!(shown(&mut a).contains("Open code-tour"));
+    shared.borrow_mut().pending = vec![hint(1, Some("  "))];
+    a.handle(AppEvent::Tick, now);
+    assert!(!shown(&mut a).contains("Open code-tour"));
+    shared.borrow_mut().pending = vec![
+        hint(1, Some("Open code-tour in Neovim")),
+        plugin_port::event(Dropped {
+            reason: "exited".into(),
+            permanent: false,
+        }),
+    ];
+    a.handle(AppEvent::Tick, now);
+    assert!(!shown(&mut a).contains("Open code-tour"));
+}

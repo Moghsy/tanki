@@ -17,6 +17,7 @@ pub enum Capability {
     HoldReview,
     Status,
     Notify,
+    Hint,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

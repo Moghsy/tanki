@@ -757,6 +757,22 @@ impl App<'_> {
             );
             return;
         }
+        if r.phase() == Phase::Answer {
+            if let Some(hint) = self.card_hint(card.queued.id) {
+                let hint: String = hint.chars().filter(|c| !c.is_control()).collect();
+                let text = format!(
+                    "{} {hint}",
+                    self.keymap.hint(&scopes, Action::PluginActions)
+                );
+                buf.set_stringn(
+                    bar.x + 1,
+                    bar.y,
+                    text,
+                    bar.width.saturating_sub(15) as usize,
+                    Style::default().fg(Color::Cyan),
+                );
+            }
+        }
         let more = format!("More {}", self.keymap.hint(&scopes, Action::More));
         buf.set_string(
             bar.right().saturating_sub(more.width() as u16 + 1),

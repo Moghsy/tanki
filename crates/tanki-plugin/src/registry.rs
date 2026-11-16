@@ -58,6 +58,11 @@ pub enum EventKind {
     HoldReview(String),
     ReleaseReview,
     Status(String),
+    /// `None` clears the plugin's hint for that card.
+    Hint {
+        card_id: i64,
+        text: Option<String>,
+    },
     Notify {
         level: Level,
         text: String,
@@ -358,6 +363,11 @@ fn handle(
             allowed(Capability::HoldReview)?;
             *holding = false;
             events.push(event(name, EventKind::ReleaseReview));
+        }
+        FromPlugin::Hint { card_id, text } => {
+            allowed(Capability::Hint)?;
+            let text = text.filter(|t| !t.trim().is_empty());
+            events.push(event(name, EventKind::Hint { card_id, text }));
         }
         FromPlugin::Status { text } => {
             allowed(Capability::Status)?;

@@ -31,11 +31,27 @@ pub enum ToPlugin {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FromPlugin {
-    Ready { api: u32 },
-    HoldReview { reason: String },
+    Ready {
+        api: u32,
+    },
+    HoldReview {
+        reason: String,
+    },
     ReleaseReview,
-    Status { text: String },
-    Notify { level: Level, text: String },
+    Status {
+        text: String,
+    },
+    /// A one-line note shown for `card_id` while its answer is visible, such
+    /// as "Open code-tour". Empty or missing text clears it.
+    Hint {
+        card_id: i64,
+        #[serde(default)]
+        text: Option<String>,
+    },
+    Notify {
+        level: Level,
+        text: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

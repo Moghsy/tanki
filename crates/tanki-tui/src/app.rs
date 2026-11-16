@@ -358,6 +358,7 @@ pub struct App<'a> {
     pub(crate) editor: EditorRunner,
     plugins: Option<Box<dyn crate::plugins::PluginPort>>,
     plugin_hold: Option<plugins::PluginHold>,
+    plugin_hint: Option<plugins::PluginHint>,
     plugin_action_list: Vec<(String, String, String)>,
     /// Last card whose `answer_revealed` hook was sent.
     reveal_fired: Option<i64>,
@@ -406,6 +407,7 @@ impl<'a> App<'a> {
             flow_options: FlowOptions::default(),
             plugins: None,
             plugin_hold: None,
+            plugin_hint: None,
             plugin_action_list: Vec::new(),
             reveal_fired: None,
         };

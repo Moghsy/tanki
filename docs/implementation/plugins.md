@@ -24,6 +24,13 @@ undeclared field is never sent), the hold and status events, and the `saved
 open` call. A manual pass with a real Herdr, Neovim and Claude session remains
 the user's terminal check; tests never start a real model session.
 
+Per-card hint (added after Phase 5): a plugin with the `hint` capability may send
+`{"type":"hint","card_id":N,"text":"..."}`. While that card's answer is visible
+the review bar shows `<plugin-actions key> <text>` (for code-tour: "Shift+O Open
+code-tour in Neovim"). The hint is tied to the card id, so a late reply never
+lands on the next card; empty text clears it, and a dropped plugin's hint is
+removed.
+
 Implementation notes for Phase 4:
 
 - The plugin lives in the sibling repository `tanki-code-tour` (Rust, no tanki

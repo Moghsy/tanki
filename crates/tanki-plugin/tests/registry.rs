@@ -6,7 +6,7 @@ use std::{
 use tanki_plugin::{manifest, registry::Limits, EventKind, Grant, Hook, HookContext, Registry};
 
 const MANIFEST: &str = "name='fake'\nversion='1'\napi=1\ncommand=['python3','-I','fake.py']\n\
-hooks=['answer_revealed']\ncapabilities=['hold_review','status']\nfields=['CodeTour']\n\
+hooks=['answer_revealed']\ncapabilities=['hold_review','status','hint']\nfields=['CodeTour']\n\
 [[actions]]\nid='open'\ntitle='Open'\n";
 
 /// A scripted plugin. `BODY` runs after the handshake unless the mode skips it.
@@ -241,5 +241,38 @@ fn actions_must_be_declared() {
     reg.action("fake", "open", 1, Instant::now());
     let events = pump(&mut reg, |e| !e.is_empty());
     assert_eq!(events[0].kind, EventKind::Status("open".into()));
+    reg.shutdown();
+}
+
+#[test]
+fn hint_needs_the_hint_capability_and_clears_on_empty_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = format!(
+        "{PRELUDE}{}",
+        r#"send({'type':'ready','api':1})
+send({'type':'hint','card_id':7,'text':'Open it'})
+send({'type':'hint','card_id':7})
+import time
+time.sleep(30)
+"#
+    );
+    let grants = plugin(dir.path(), &script);
+    let (mut reg, _) = Registry::discover(dir.path(), &grants, limits());
+    reg.dispatch(Hook::AnswerRevealed, &ctx(), Instant::now());
+    let events = pump(&mut reg, |e| e.len() >= 2);
+    assert_eq!(
+        events[0].kind,
+        EventKind::Hint {
+            card_id: 7,
+            text: Some("Open it".into())
+        }
+    );
+    assert_eq!(
+        events[1].kind,
+        EventKind::Hint {
+            card_id: 7,
+            text: None
+        }
+    );
     reg.shutdown();
 }

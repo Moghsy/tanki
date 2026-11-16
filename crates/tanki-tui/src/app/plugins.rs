@@ -5,6 +5,12 @@ use crate::plugins::PluginPort;
 use tanki_core::config::{plugins_dir, Config};
 use tanki_plugin::{registry::Limits, Event, EventKind, Grant, Hook, HookContext, Registry};
 
+pub(super) struct PluginHint {
+    pub plugin: String,
+    pub card_id: i64,
+    pub text: String,
+}
+
 pub(super) struct PluginHold {
     pub plugin: String,
     pub status: String,
@@ -14,6 +20,16 @@ impl App<'_> {
     pub(crate) fn holding(&self) -> bool {
         matches!(&self.screen, Screen::Review(v) if v.reviewer.holding())
     }
+    /// The plugin's one-line hint for the card on screen, shown with the
+    /// answer. It is tied to a card id, so a late reply never lands on the
+    /// next card.
+    pub(crate) fn card_hint(&self, card_id: i64) -> Option<&str> {
+        self.plugin_hint
+            .as_ref()
+            .filter(|h| h.card_id == card_id)
+            .map(|h| h.text.as_str())
+    }
+
     /// The plugin's status line while it holds the review.
     pub(crate) fn hold_status(&self) -> Option<&str> {
         self.plugin_hold.as_ref().map(|h| h.status.as_str())
@@ -165,6 +181,13 @@ impl App<'_> {
                         hold.status = text;
                     }
                 }
+                EventKind::Hint { card_id, text } => {
+                    self.plugin_hint = text.map(|text| PluginHint {
+                        plugin,
+                        card_id,
+                        text,
+                    });
+                }
                 EventKind::Notify { level, text } => {
                     let text = format!(
                         "{plugin}: {}",
@@ -176,6 +199,13 @@ impl App<'_> {
                     }
                 }
                 EventKind::Dropped { reason, permanent } => {
+                    if self
+                        .plugin_hint
+                        .as_ref()
+                        .is_some_and(|h| h.plugin == plugin)
+                    {
+                        self.plugin_hint = None;
+                    }
                     let tail = if permanent {
                         " (disabled for this session)"
                     } else {
