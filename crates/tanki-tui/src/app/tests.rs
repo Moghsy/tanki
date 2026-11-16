@@ -656,3 +656,164 @@ fn code_tour_starts_reader_when_no_editor_is_running() {
     assert!(!a.tour_holding());
     assert!(b.state.borrow().answered.is_empty());
 }
+
+// ---- plugin hooks and generic hold ----------------------------------------
+
+mod plugin_port {
+    use super::*;
+    use crate::plugins::PluginPort;
+    use std::{cell::RefCell, rc::Rc, time::Instant};
+    use tanki_plugin::{Event, EventKind, Hook, HookContext};
+
+    #[derive(Default)]
+    pub struct Shared {
+        pub seen: Vec<HookContext>,
+        pub on_hook: Vec<Event>,
+        pub pending: Vec<Event>,
+        pub actions_run: Vec<(String, String, i64)>,
+    }
+    pub struct Fake(pub Rc<RefCell<Shared>>);
+    impl PluginPort for Fake {
+        fn dispatch(&mut self, _: Hook, ctx: &HookContext, _: Instant) -> Vec<Event> {
+            let mut s = self.0.borrow_mut();
+            s.seen.push(ctx.clone());
+            std::mem::take(&mut s.on_hook)
+        }
+        fn action(&mut self, plugin: &str, id: &str, card_id: i64, _: Instant) -> Vec<Event> {
+            self.0
+                .borrow_mut()
+                .actions_run
+                .push((plugin.into(), id.into(), card_id));
+            vec![]
+        }
+        fn poll(&mut self, _: Instant) -> Vec<Event> {
+            std::mem::take(&mut self.0.borrow_mut().pending)
+        }
+        fn actions(&self) -> Vec<(String, String, String)> {
+            vec![("fake".into(), "open".into(), "Open it".into())]
+        }
+        fn shutdown(&mut self) {}
+    }
+    pub fn event(kind: EventKind) -> Event {
+        Event {
+            plugin: "fake".into(),
+            kind,
+        }
+    }
+}
+
+fn plugin_app<'a>(
+    b: &'a FakeBackend,
+    now: Now,
+) -> (
+    App<'a>,
+    std::rc::Rc<std::cell::RefCell<plugin_port::Shared>>,
+) {
+    let mut a = app(b, Start::Review, now);
+    let shared = std::rc::Rc::new(std::cell::RefCell::new(plugin_port::Shared::default()));
+    a.set_plugins(Some(Box::new(plugin_port::Fake(shared.clone()))));
+    (a, shared)
+}
+
+#[test]
+fn plugin_hook_fires_once_after_reveal_with_note_fields() {
+    let mut c = card(1, "Q", "A");
+    c.queued.fields = [("CodeTour".to_owned(), "x".to_owned())].into();
+    let b = FakeBackend::new(vec![c]);
+    let now = t0();
+    let (mut a, shared) = plugin_app(&b, now);
+    a.handle(AppEvent::Tick, now);
+    assert!(shared.borrow().seen.is_empty(), "nothing before the reveal");
+    a.dispatch(Action::ShowAnswerOrGood);
+    a.handle(AppEvent::Tick, now);
+    a.handle(AppEvent::Tick, now);
+    let seen = &shared.borrow().seen;
+    assert_eq!(seen.len(), 1);
+    assert_eq!((seen[0].card_id, seen[0].note_id), (1, 10));
+    assert_eq!(seen[0].fields["CodeTour"], "x");
+}
+
+#[test]
+fn plugin_hold_blocks_rating_and_ctrl_o_force_releases() {
+    use tanki_plugin::EventKind::*;
+    let b = FakeBackend::new(vec![card(1, "Q", "A")]);
+    let now = t0();
+    let (mut a, shared) = plugin_app(&b, now);
+    a.dispatch(Action::ShowAnswerOrGood);
+    shared.borrow_mut().on_hook = vec![plugin_port::event(HoldReview("opening".into()))];
+    a.handle(AppEvent::Tick, now);
+    assert!(a.tour_holding());
+    assert_eq!(a.tour_status(), Some("opening"));
+    shared.borrow_mut().pending = vec![plugin_port::event(Status("reading".into()))];
+    a.handle(AppEvent::Tick, now);
+    assert_eq!(a.tour_status(), Some("reading"));
+    a.dispatch(Action::Good);
+    assert!(b.state.borrow().answered.is_empty(), "rating is blocked");
+    a.dispatch(Action::ResumeCodeTour);
+    assert!(!a.tour_holding() && a.tour_status().is_none());
+    // The hook does not fire again for the same card after returning.
+    a.handle(AppEvent::Tick, now.plus_millis(1000));
+    assert_eq!(shared.borrow().seen.len(), 1);
+    a.dispatch(Action::Good);
+    assert_eq!(b.state.borrow().answered.len(), 1);
+}
+
+#[test]
+fn plugin_release_event_and_dropped_plugin_end_the_hold() {
+    use tanki_plugin::EventKind::*;
+    for ending in [
+        vec![ReleaseReview],
+        vec![
+            ReleaseReview,
+            Dropped {
+                reason: "exited".into(),
+                permanent: false,
+            },
+        ],
+    ] {
+        let b = FakeBackend::new(vec![card(1, "Q", "A")]);
+        let now = t0();
+        let (mut a, shared) = plugin_app(&b, now);
+        a.dispatch(Action::ShowAnswerOrGood);
+        shared.borrow_mut().on_hook = vec![plugin_port::event(HoldReview("x".into()))];
+        a.handle(AppEvent::Tick, now);
+        assert!(a.tour_holding());
+        shared.borrow_mut().pending = ending.into_iter().map(plugin_port::event).collect();
+        a.handle(AppEvent::Tick, now);
+        assert!(!a.tour_holding());
+    }
+}
+
+#[test]
+fn plugin_cannot_hold_the_question_side_or_a_second_time() {
+    use tanki_plugin::EventKind::*;
+    let b = FakeBackend::new(vec![card(1, "Q", "A")]);
+    let now = t0();
+    let (mut a, shared) = plugin_app(&b, now);
+    shared.borrow_mut().pending = vec![plugin_port::event(HoldReview("early".into()))];
+    a.handle(AppEvent::Tick, now);
+    assert!(!a.tour_holding(), "no hold before the answer is revealed");
+    a.dispatch(Action::ShowAnswerOrGood);
+    shared.borrow_mut().on_hook = vec![plugin_port::event(HoldReview("first".into()))];
+    a.handle(AppEvent::Tick, now);
+    shared.borrow_mut().pending = vec![plugin_port::event(HoldReview("second".into()))];
+    a.handle(AppEvent::Tick, now);
+    assert_eq!(a.tour_status(), Some("first"));
+}
+
+#[test]
+fn plugin_actions_are_chosen_and_forwarded() {
+    let b = FakeBackend::new(vec![card(1, "Q", "A")]);
+    let now = t0();
+    let (mut a, shared) = plugin_app(&b, now);
+    a.dispatch(Action::PluginActions);
+    assert!(a.overlay.is_some());
+    a.handle(
+        AppEvent::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now.at),
+        now,
+    );
+    assert_eq!(
+        shared.borrow().actions_run,
+        [("fake".to_owned(), "open".to_owned(), 1)]
+    );
+}

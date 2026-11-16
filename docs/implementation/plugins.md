@@ -1,13 +1,35 @@
 # tanki plugins: design and implementation plan
 
-Status: **Phase 2 done** (`crates/tanki-plugin`: manifest, protocol, host,
-registry; 17 tests including a scripted fake plugin). Phases 3-5 pending.
+Status: **Phases 2 and 3 done.** Phase 2: `crates/tanki-plugin` (manifest, protocol,
+host, registry; 17 tests with a scripted fake plugin). Phase 3: TUI hooks and
+generic hold (below). Phases 4-5 pending.
 Code-tour (Neovim) is the first plugin; today it is still built into tanki and
 will migrate in Phase 4.
 
 Decisions taken: code-tour plugin in Rust; the add/edit-form picker (Alt+G) is
 deferred; no "refresh stale sections" action yet. Claude stays lazy and the
 Neovim plugin needs no new patch.
+
+Implementation notes for Phase 3:
+
+- `tanki-tui` talks to plugins through the `PluginPort` trait
+  (`crates/tanki-tui/src/plugins.rs`); `tanki_plugin::Registry` implements it
+  and tests substitute a scripted fake.
+- `[plugins.<name>]` in `config.toml` (`enabled`, `manifest_sha256`, free-form
+  `settings`) is loaded by `App::set_config`; plugins live in `plugins/` next to
+  the config file. Refused plugins show an error notice.
+- `answer_revealed` fires from the tick once per card, only on the answer side
+  and never over an overlay or layer. The card's note fields come from
+  `QueuedCard::fields` (never serialized); the host filters them to the fields
+  the manifest declares. The hook carries `deck_id`, not a deck name.
+- The reviewer's hold (`begin_hold`/`end_hold`, formerly `begin_tour`/`end_tour`)
+  is shared with the built-in tour. A plugin can hold only on the answer side and
+  only when nothing else holds; the first owner keeps it. A plugin that is
+  dropped while holding releases first. Ctrl+O (`resume-code-tour`) always
+  force-releases.
+- `plugin-actions` opens a chooser of declared actions and forwards the choice.
+  Per-plugin palette entries and key bindings are deferred to Phase 4, where the
+  code-tour plugin needs them.
 
 Implementation notes for Phase 2: the grant pins the SHA-256 of `plugin.toml`
 (`manifest_sha256`); a missing or stale pin refuses the plugin and reports the

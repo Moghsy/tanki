@@ -34,7 +34,7 @@ fn ctx() -> HookContext {
     HookContext {
         card_id: 7,
         note_id: 8,
-        deck: "Default".into(),
+        deck_id: 1,
         fields: BTreeMap::from([
             ("CodeTour".into(), "code-tour://saved/x".into()),
             ("Secret".into(), "must not leak".into()),

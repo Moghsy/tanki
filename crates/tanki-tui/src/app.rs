@@ -32,6 +32,7 @@ pub const MESSAGE_SECS: u64 = 5;
 pub const CONGRATS_POLL_SECS: u64 = 60;
 
 mod code_tour;
+mod plugins;
 
 pub type Opener = Box<dyn Fn(&Path) -> std::io::Result<()>>;
 /// Runs the editor command (program and arguments) on a file and waits. The
@@ -271,6 +272,8 @@ pub enum ChoiceValue {
     TourAttach(usize),
     TourMore,
     TourPickerCancel,
+    /// An entry of the plugin action list (index).
+    PluginAction(usize),
     Cancel,
 }
 
@@ -363,6 +366,11 @@ pub struct App<'a> {
     tour_launcher: code_tour::TourLauncher,
     tour_picker: Option<code_tour::TourPicker>,
     tour_editor: Option<serde_json::Value>,
+    plugins: Option<Box<dyn crate::plugins::PluginPort>>,
+    plugin_hold: Option<plugins::PluginHold>,
+    plugin_action_list: Vec<(String, String, String)>,
+    /// Last card whose `answer_revealed` hook was sent.
+    reveal_fired: Option<i64>,
     /// Where the editor flows put their private temporary folders.
     pub(crate) flow_options: FlowOptions,
 }
@@ -409,6 +417,10 @@ impl<'a> App<'a> {
             tour: None,
             tour_picker: None,
             tour_editor: None,
+            plugins: None,
+            plugin_hold: None,
+            plugin_action_list: Vec::new(),
+            reveal_fired: None,
             tour_launcher: code_tour::launcher(),
         };
         app.next_day_at = backend::sched_timing(&app.backend)
@@ -723,6 +735,7 @@ impl<'a> App<'a> {
     fn on_tick(&mut self) {
         let now = self.now;
         self.poll_code_tour();
+        self.poll_plugins();
         self.poll_tour_picker();
         self.poll_job();
         self.tick_layers();
@@ -1110,6 +1123,7 @@ impl<'a> App<'a> {
             Action::Quit => self.quit = true,
             Action::OpenCodeTour => self.open_code_tour(),
             Action::ResumeCodeTour => self.resume_code_tour(),
+            Action::PluginActions => self.plugin_actions(),
             Action::AddNote => self.open_add(),
             Action::Browse => {
                 let search = match &self.screen {
@@ -2067,6 +2081,7 @@ impl<'a> App<'a> {
             ChoiceValue::TourCancel => self.resume_code_tour(),
             ChoiceValue::TourAttach(index) => self.attach_picked_tour(index),
             ChoiceValue::TourMore => self.more_tours(),
+            ChoiceValue::PluginAction(index) => self.run_plugin_action(index),
             ChoiceValue::TourPickerCancel => {
                 self.tour_picker = None;
             }

@@ -42,7 +42,7 @@ impl Default for Limits {
 pub struct HookContext {
     pub card_id: i64,
     pub note_id: i64,
-    pub deck: String,
+    pub deck_id: i64,
     /// All note fields; each plugin receives only those its manifest declares.
     pub fields: BTreeMap<String, String>,
 }
@@ -150,6 +150,23 @@ impl Registry {
             .collect()
     }
 
+    /// `(plugin, action id, title)` for every declared action of a live plugin.
+    pub fn actions(&self) -> Vec<(String, String, String)> {
+        self.slots
+            .iter()
+            .filter(|s| !s.gone)
+            .flat_map(|s| {
+                s.loaded.manifest.actions.iter().map(|a| {
+                    (
+                        s.loaded.manifest.name.clone(),
+                        a.id.clone(),
+                        a.title.clone(),
+                    )
+                })
+            })
+            .collect()
+    }
+
     /// Delivers a hook to every granted subscriber, starting plugins lazily.
     pub fn dispatch(&mut self, hook: Hook, ctx: &HookContext, now: Instant) -> Vec<Event> {
         let mut events = Vec::new();
@@ -177,7 +194,7 @@ impl Registry {
                 name: hook,
                 card_id: ctx.card_id,
                 note_id: ctx.note_id,
-                deck: ctx.deck.clone(),
+                deck_id: ctx.deck_id,
                 fields,
             };
             if let Err(e) = slot.running.as_ref().unwrap().host.send(&message) {

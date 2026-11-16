@@ -20,6 +20,7 @@ pub mod keymap;
 pub mod links;
 pub mod notetypes_ui;
 pub mod package_ui;
+pub mod plugins;
 pub mod reviewer;
 pub mod services;
 pub mod stats_ui;

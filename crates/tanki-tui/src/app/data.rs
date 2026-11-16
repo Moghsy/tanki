@@ -38,6 +38,7 @@ impl App<'_> {
         if let Some(path) = &self.config_path {
             match Config::load(path) {
                 Ok(config) => {
+                    self.load_plugins(&config);
                     if let Some(profile) = config.profiles.get(&self.profile_key()) {
                         self.render_tiers = profile
                             .render_tiers

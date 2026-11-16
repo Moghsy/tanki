@@ -18,7 +18,7 @@ pub enum ToPlugin {
         name: Hook,
         card_id: i64,
         note_id: i64,
-        deck: String,
+        deck_id: i64,
         fields: BTreeMap<String, String>,
     },
     Action {

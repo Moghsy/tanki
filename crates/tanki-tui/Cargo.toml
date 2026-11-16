@@ -16,6 +16,7 @@ tanki-core = { path = "../tanki-core" }
 tanki-render = { path = "../tanki-render" }
 tanki-term = { path = "../tanki-term" }
 tanki-media = { path = "../tanki-media" }
+tanki-plugin = { path = "../tanki-plugin" }
 ratatui.workspace = true
 crossterm.workspace = true
 unicode-width = "0.2"

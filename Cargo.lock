@@ -6280,6 +6280,7 @@ dependencies = [
  "tanki-connect",
  "tanki-core",
  "tanki-media",
+ "tanki-plugin",
  "tanki-render",
  "tanki-term",
  "tempfile",

@@ -189,7 +189,7 @@ pub(crate) fn queue(col: &mut Collection, limit: u32, cache: &mut StateCache) ->
     let mut cards = Vec::new();
     let script = config_string(col, StringKey::CardStateCustomizer)?;
     let mut custom_scheduling_error = None;
-    let mut tour_fields: HashMap<i64, Option<usize>> = HashMap::new();
+    let mut field_names: HashMap<i64, Vec<String>> = HashMap::new();
     for c in q.cards {
         let card = c
             .card
@@ -221,27 +221,29 @@ pub(crate) fn queue(col: &mut Collection, limit: u32, cache: &mut StateCache) ->
             Ok(pb::scheduler::queued_cards::Queue::Review) => QueueKind::Review,
             _ => QueueKind::New,
         };
-        let tour_ord = if let Some(ord) = tour_fields.get(&note.notetype_id) {
-            *ord
-        } else {
+        if !field_names.contains_key(&note.notetype_id) {
             let nt = NotetypesService::get_notetype(
                 col,
                 pb::notetypes::NotetypeId {
                     ntid: note.notetype_id,
                 },
             )?;
-            let ord = nt
-                .fields
-                .iter()
-                .position(|f| f.name == crate::code_tour::FIELD);
-            tour_fields.insert(note.notetype_id, ord);
-            ord
-        };
-        let code_tour = tour_ord
-            .and_then(|ord| note.fields.get(ord))
+            field_names.insert(
+                note.notetype_id,
+                nt.fields.iter().map(|f| f.name.clone()).collect(),
+            );
+        }
+        let fields: std::collections::BTreeMap<String, String> = field_names[&note.notetype_id]
+            .iter()
+            .cloned()
+            .zip(note.fields.iter().cloned())
+            .collect();
+        let code_tour = fields
+            .get(crate::code_tour::FIELD)
             .and_then(|value| crate::code_tour::parse_field(value));
         cards.push(QueuedCard {
             code_tour,
+            fields,
             id: card.id,
             intervals,
             note_id: card.note_id,

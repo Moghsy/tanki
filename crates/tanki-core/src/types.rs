@@ -113,6 +113,10 @@ pub struct QueuedCard {
     /// Optional saved code-tour in the note's CodeTour field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_tour: Option<crate::code_tour::Attachment>,
+    /// Raw note fields by name, for plugins. Never serialized; a plugin only
+    /// receives the fields its manifest declares.
+    #[serde(default, skip_serializing)]
+    pub fields: std::collections::BTreeMap<String, String>,
     pub id: i64,
     /// Again, Hard, Good, Easy labels from `DescribeNextStates`, localised,
     /// isolation marks stripped.

@@ -135,7 +135,7 @@ pub struct ConnectSettings {
     pub in_tui: bool,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub last_profile: Option<String>,
@@ -145,6 +145,8 @@ pub struct Config {
     pub editor: EditorSettings,
     pub connect: ConnectSettings,
     pub code_tour: CodeTourSettings,
+    /// User grants for out-of-process plugins, keyed by plugin name.
+    pub plugins: BTreeMap<String, PluginConfig>,
 }
 
 impl Config {
@@ -427,4 +429,23 @@ impl Default for CodeTourSettings {
             repositories: BTreeMap::new(),
         }
     }
+}
+
+/// The user's grant for one plugin (`[plugins.<name>]`). A plugin runs only
+/// when `enabled` and `manifest_sha256` matches its installed `plugin.toml`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PluginConfig {
+    pub enabled: bool,
+    pub manifest_sha256: Option<String>,
+    /// Opaque to tanki; delivered to the plugin in its `hello`.
+    pub settings: toml::Table,
+}
+
+/// The folder that holds plugins, next to the config file.
+pub fn plugins_dir(config_path: &Path) -> PathBuf {
+    config_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("plugins")
 }

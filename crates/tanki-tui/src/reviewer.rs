@@ -202,7 +202,7 @@ impl Reviewer {
         end.saturating_duration_since(self.shown_at)
             .saturating_sub(self.held)
     }
-    pub fn begin_tour(&mut self, now: Now) -> bool {
+    pub fn begin_hold(&mut self, now: Now) -> bool {
         if self.holding() || self.phase != Phase::Answer || self.card.is_none() {
             return false;
         }
@@ -212,7 +212,7 @@ impl Reviewer {
         self.auto_advance = false;
         true
     }
-    pub fn end_tour(&mut self, b: &dyn Backend, now: Now) -> Vec<Effect> {
+    pub fn end_hold(&mut self, b: &dyn Backend, now: Now) -> Vec<Effect> {
         let Some(start) = self.hold_at.take() else {
             return Vec::new();
         };

@@ -20,7 +20,10 @@ impl App<'_> {
         matches!(&self.screen, Screen::Review(v) if v.reviewer.holding())
     }
     pub(crate) fn tour_status(&self) -> Option<&str> {
-        self.tour.as_ref().map(|t| t.status.as_str())
+        self.tour
+            .as_ref()
+            .map(|t| t.status.as_str())
+            .or_else(|| self.plugin_hold.as_ref().map(|h| h.status.as_str()))
     }
     fn tour_settings(&self) -> Result<CodeTourSettings, String> {
         let settings = self
@@ -71,7 +74,7 @@ impl App<'_> {
             return;
         };
         let card_id = view.reviewer.card().unwrap().queued.id;
-        if !view.reviewer.begin_tour(now) {
+        if !view.reviewer.begin_hold(now) {
             return;
         }
         self.message = None;
@@ -115,9 +118,10 @@ impl App<'_> {
         if self.tour.is_none() && !self.tour_holding() {
             return;
         }
+        self.plugin_hold = None; // Ctrl+O always force-releases a plugin hold.
         self.tour = None; // Cancels pending worker; its late response has no receiver.
         self.overlay = None;
-        self.with_reviewer(|r, b, now| r.end_tour(b, now));
+        self.with_reviewer(|r, b, now| r.end_hold(b, now));
         self.after_editor();
         self.ignore_keys_before = Some(self.now.at);
     }

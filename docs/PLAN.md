@@ -773,7 +773,7 @@ Priority:
 3. [x] **Custom scheduling JS**: QuickJS with protobuf-JSON parity, async jobs, context/custom-data support, resource limits and failure warnings. Matters only for collections whose custom scheduling script is non-empty (deck options → Advanced); the user checks their own profile (rule 1).
 
 4. [x] **Neovim saved code-tour cards** (user requested, 2026-11-15): typed note references, CLI creation/attachment, add/edit picker, held review, Herdr reader launch and lazy Claude connection. See `docs/neovim.md` and `docs/implementation/neovim-code-tour-plan.md`.
-5. [ ] **Plugins** (user requested, 2026-11-16): out-of-process plugins with a closed hook catalogue and user-granted manifests; code-tour becomes the first plugin. Phase 2 (`tanki-plugin` crate) done; hooks in the TUI, code-tour migration and docs pending. See `docs/implementation/plugins.md`.
+5. [ ] **Plugins** (user requested, 2026-11-16): out-of-process plugins with a closed hook catalogue and user-granted manifests; code-tour becomes the first plugin. Phases 2 (`tanki-plugin` crate) and 3 (TUI hooks, generic hold, plugin actions) done; code-tour migration and docs pending. See `docs/implementation/plugins.md`.
 
 Optional (low value in a terminal; existing paths cover them):
 

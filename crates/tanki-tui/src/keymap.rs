@@ -154,6 +154,7 @@ actions! {
     ZoomImage = "zoom-image", "Zoom images";
     OpenCodeTour = "open-code-tour", "Open saved code-tour in Neovim";
     ResumeCodeTour = "resume-code-tour", "Return to card from code-tour";
+    PluginActions = "plugin-actions", "Run a plugin action";
     OpenInBrowser = "open-in-browser", "Open card in the web browser";
     ToggleHints = "toggle-hints", "Show / hide hints";
     ToggleDetails = "toggle-details", "Show / hide details";
